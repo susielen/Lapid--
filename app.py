@@ -5,7 +5,7 @@ import re
 from openpyxl.styles import Font
 
 st.set_page_config(page_title="Conciliador Contábil Pro", layout="wide")
-st.title("🤖 Conciliador: Totais e Resumos no Topo")
+st.title("🤖 Conciliador: Organização de Topo Personalizada")
 
 arquivo = st.file_uploader("Suba o Razão do Domínio aqui", type=["csv", "xlsx"])
 
@@ -67,56 +67,55 @@ if arquivo is not None:
                 
                 nome_aba = re.sub(r'[\\/*?:\[\]]', '', forn)[:31]
                 
-                # Inicia as tabelas na linha 3 para deixar as linhas 1 e 2 para os totais
-                df_f.to_excel(writer, sheet_name=nome_aba, index=False, startrow=2)
-                df_c.to_excel(writer, sheet_name=nome_aba, index=False, startrow=2, startcol=8)
+                # Inicia as tabelas na linha 5 para dar espaço ao cabeçalho novo
+                df_f.to_excel(writer, sheet_name=nome_aba, index=False, startrow=4)
+                df_c.to_excel(writer, sheet_name=nome_aba, index=False, startrow=4, startcol=8)
                 
                 sheet = writer.sheets[nome_aba]
                 fmt_contabil = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
+                negrito = Font(bold=True)
                 cor_vermelha = Font(bold=True, color="FF0000")
                 cor_verde = Font(bold=True, color="00B050")
-                negrito = Font(bold=True)
 
-                # --- TOTAIS DO RAZÃO NO TOPO (Linha 1) ---
-                sheet.cell(row=1, column=1, value=f"FORNECEDOR: {forn}").font = negrito
-                sheet.cell(row=1, column=4, value="TOTAL DÉBITO (-):").font = negrito
-                val_deb = sheet.cell(row=1, column=5, value=df_f['Débito'].sum())
-                val_deb.number_format = fmt_contabil
-                
-                sheet.cell(row=1, column=6, value="TOTAL CRÉDITO (+):").font = negrito
-                val_cre = sheet.cell(row=1, column=7, value=df_f['Crédito'].sum())
-                val_cre.number_format = fmt_contabil
-                
+                # --- LINHA 1: NOME DO FORNECEDOR ---
+                sheet.cell(row=1, column=1, value=forn).font = negrito
+
+                # --- LINHA 3: TOTAIS EM CIMA DAS COLUNAS ---
+                # Totais do Razão
+                sheet.cell(row=3, column=4, value="TOT. DÉBITO:").font = negrito
+                c_deb_topo = sheet.cell(row=3, column=5, value=df_f['Débito'].sum())
+                c_deb_topo.number_format = fmt_contabil
+                c_deb_topo.font = negrito
+
+                sheet.cell(row=3, column=6, value="TOT. CRÉDITO:").font = negrito
+                c_cre_topo = sheet.cell(row=3, column=7, value=df_f['Crédito'].sum())
+                c_cre_topo.number_format = fmt_contabil
+                c_cre_topo.font = negrito
+
+                # Saldo/Totalizador da Conciliação (Em cima da coluna Diferença - Col 12)
                 saldo = df_f['Crédito'].sum() - df_f['Débito'].sum()
-                sheet.cell(row=2, column=6, value="SALDO ATUAL:").font = negrito
-                val_saldo = sheet.cell(row=2, column=7, value=saldo)
-                val_saldo.number_format = fmt_contabil
-                val_saldo.font = cor_vermelha if saldo < 0 else cor_verde
+                sheet.cell(row=3, column=11, value="ABERTO:").font = negrito
+                c_aberto = sheet.cell(row=3, column=12, value=saldo)
+                c_aberto.number_format = fmt_contabil
+                c_aberto.font = cor_vermelha if saldo < 0 else cor_verde
 
-                # --- TOTALIZADOR DA CONCILIAÇÃO NO TOPO (Linha 1) ---
-                sheet.cell(row=1, column=11, value="CONCILIAÇÃO ABERTA:").font = negrito
-                c_topo = sheet.cell(row=1, column=12, value=saldo)
-                c_topo.number_format = fmt_contabil
-                c_topo.font = cor_vermelha if saldo < 0 else cor_verde
-
-                # Formatação das colunas de valores (Corpo das tabelas)
-                for r in range(4, len(df_f) + 4):
+                # Formatação das colunas de valores no corpo
+                for r in range(6, len(df_f) + 6):
                     sheet.cell(row=r, column=5).number_format = fmt_contabil
                     sheet.cell(row=r, column=6).number_format = fmt_contabil
 
-                for r in range(4, len(df_c) + 4):
-                    sheet.cell(row=r, column=10).number_format = fmt_contabil # Débito NF
-                    sheet.cell(row=r, column=11).number_format = fmt_contabil # Crédito NF
-                    
-                    c_dif = sheet.cell(row=r, column=12) # Diferença NF
+                for r in range(6, len(df_c) + 6):
+                    sheet.cell(row=r, column=10).number_format = fmt_contabil
+                    sheet.cell(row=r, column=11).number_format = fmt_contabil
+                    c_dif = sheet.cell(row=r, column=12)
                     c_dif.number_format = fmt_contabil
-                    c_dif.font = Font(color="FF0000") if c_dif.value and c_dif.value < 0 else Font(color="00B050")
+                    c_dif.font = Font(color="FF0000") if (c_dif.value or 0) < 0 else Font(color="00B050")
                     
                     c_status = sheet.cell(row=r, column=13)
                     c_status.font = Font(color="00B050") if c_status.value == "OK" else Font(color="FF0000")
 
-        st.success("✅ Relatório com Totais no Topo Gerado!")
-        st.download_button("📥 Baixar Excel Final", data=output.getvalue(), file_name="conciliacao_topo.xlsx")
+        st.success("✅ Relatório formatado com sucesso!")
+        st.download_button("📥 Baixar Planilha Final Ajustada", data=output.getvalue(), file_name="conciliacao_alinhada_topo.xlsx")
             
     except Exception as e:
         st.error(f"Erro: {e}")
