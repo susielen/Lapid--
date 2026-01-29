@@ -11,13 +11,13 @@ arquivo = st.file_uploader("Suba o Razão (Excel ou CSV)", type=["xlsx", "csv"])
 
 if arquivo:
     try:
-        # 1. Leitura do arquivo
+        # 1. Leitura do arquivo (Excel ou CSV)
         if arquivo.name.endswith('.csv'):
             df_bruto = pd.read_csv(arquivo, header=None)
         else:
             df_bruto = pd.read_excel(arquivo, engine='openpyxl', header=None)
         
-        # Busca nome da empresa no topo
+        # Busca nome da empresa no topo (primeiras 10 linhas)
         nome_empresa = "EMPRESA NÃO IDENTIFICADA"
         for i in range(min(10, len(df_bruto))):
             txt = str(df_bruto.iloc[i, 0])
@@ -29,18 +29,19 @@ if arquivo:
         fornecedor_atual = None
         dados_acumulados = []
 
-        # 2. Processamento
+        # 2. Processamento dos Dados
         for i in range(len(df_bruto)):
             linha = df_bruto.iloc[i]
             col0 = str(linha[0]).strip() if pd.notna(linha[0]) else ""
 
+            # Identifica início de Fornecedor
             if "Conta:" in col0:
                 if fornecedor_atual and dados_acumulados:
                     banco_fornecedores[fornecedor_atual] = pd.DataFrame(dados_acumulados)
                 
                 codigo = str(linha.iloc[1]).strip() if pd.notna(linha.iloc[1]) else "000"
                 nome_forn = "Sem Nome"
-                for c in [5, 6, 2]:
+                for c in [5, 6, 2]: # Procura nome nas colunas prováveis
                     if len(linha) > c and pd.notna(linha.iloc[c]) and str(linha.iloc[c]).strip() != "":
                         nome_forn = str(linha.iloc[c]).strip()
                         break
@@ -50,6 +51,7 @@ if arquivo:
                 continue
             
             try:
+                # Verifica se é linha de valores (Débito e Crédito)
                 if len(linha) > 9 and (pd.notna(linha[8]) or pd.notna(linha[9])):
                     def conv(v):
                         try: return float(str(v).replace(',', '.')) if pd.notna(v) else 0.0
@@ -57,44 +59,32 @@ if arquivo:
                     
                     d_orig, c_orig = conv(linha[8]), conv(linha[9])
                     if d_orig == 0 and c_orig == 0: continue
+
                     hist = str(linha[2])
                     nfe = re.findall(r'NFe\s?(\d+)', hist)
                     num_nota = nfe[0] if nfe else str(linha[1])
+
                     dados_acumulados.append({
-                        "Data": str(linha[0]), "NF": num_nota, "Histórico": hist, "Débito": -d_orig, "Crédito": c_orig
+                        "Data": str(linha[0]), "NF": num_nota, "Histórico": hist, 
+                        "Débito": -d_orig, "Crédito": c_orig
                     })
             except: continue
 
         if fornecedor_atual and dados_acumulados:
             banco_fornecedores[fornecedor_atual] = pd.DataFrame(dados_acumulados)
 
-        # 3. Geração do Excel
+        # 3. Geração do Excel com a Nova Formatação
         if banco_fornecedores:
             output = BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 workbook = writer.book
                 
                 # Formatos
-                fmt_titulo_empresa = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#D3D3D3', 'border': 1, 'text_wrap': True})
-                fmt_fornecedor_esq = workbook.add_format({'bold': True, 'align': 'left', 'font_size': 11})
+                fmt_titulo_emp = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#D3D3D3', 'border': 1, 'text_wrap': True})
+                fmt_forn_esq = workbook.add_format({'bold': True, 'align': 'left', 'font_size': 11})
                 fmt_moeda = workbook.add_format({'num_format': '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-', 'border': 1})
                 fmt_verde = workbook.add_format({'num_format': '_-R$ * #,##0.00_-', 'font_color': 'green', 'bold': True, 'border': 1})
                 fmt_vermelho = workbook.add_format({'num_format': '-R$ * #,##0.00_-', 'font_color': 'red', 'bold': True, 'border': 1})
                 fmt_negrito = workbook.add_format({'bold': True, 'border': 1})
 
-                for f_id_nome, df_f in banco_fornecedores.items():
-                    aba = "".join(c for c in f_id_nome[:31] if c.isalnum() or c in " -")
-                    
-                    # --- TABELAS MAIS PARA BAIXO: LINHA 10 (startrow=9) ---
-                    df_f.to_excel(writer, sheet_name=aba, startrow=9, startcol=1, index=False)
-                    df_res = df_f.groupby("NF").agg({"Débito":"sum", "Crédito":"sum"}).reset_index()
-                    df_res["Diferença"] = df_res["Débito"] + df_res["Crédito"]
-                    
-                    col_res_idx = len(df_f.columns) + 4
-                    df_res.to_excel(writer, sheet_name=aba, startrow=9, startcol=col_res_idx, index=False)
-                    
-                    ws = writer.sheets[aba]
-                    ws.set_column('A:A', 2)
-                    ws.set_row(0, 5) # Linha 1 fina
-                    
-                    # Título da Empresa (Linhas 2 e 3)
+                for f_id_nome
