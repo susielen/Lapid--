@@ -1,76 +1,111 @@
 import streamlit as st
 import pandas as pd
 import io, re
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, Alignment, PatternFill
 
-st.set_page_config(page_title="Conciliador Turbo", layout="wide")
-st.title("🧼 Conciliador Profissional (Versão Limpa)")
+st.set_page_config(page_title="Conciliador Limpo", layout="wide")
+st.title("🧼 Conciliador: Versão Sem Erros (NAN Free)")
 
-arquivo = st.file_uploader("Suba o arquivo Razão aqui", type=["csv", "xlsx"])
+arquivo = st.file_uploader("Suba o arquivo Razão (Excel ou CSV)", type=["csv", "xlsx"])
 
-def limpar(v):
-    """Apaga NANs e espaços extras"""
-    txt = str(v)
-    if txt.lower() in ['nan', 'none', '']: return ""
-    return " ".join(txt.split()).strip()
+def limpar_sujeira(texto):
+    """Remove NANs, Nones e espaços extras de qualquer texto"""
+    if pd.isna(texto) or str(texto).lower() in ['nan', 'none', '']:
+        return ""
+    # Remove a palavra 'nan' caso ela esteja no meio de uma frase
+    limpo = re.sub(r'\bnan\b', '', str(texto), flags=re.IGNORECASE)
+    return " ".join(limpo.split()).strip()
 
 if arquivo:
     try:
-        df = pd.read_excel(arquivo) if arquivo.name.endswith('.xlsx') else pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
-        
-        # Pega o nome da empresa na primeira linha
-        linha1 = " ".join([str(x) for x in df.iloc[0].values if pd.notna(x)])
-        nome_empresa = limpar(linha1.upper().split("EMPRESA:")[-1].split("CNPJ:")[0]) if "EMPRESA:" in linha1.upper() else "MINHA EMPRESA"
+        # Carregamento do arquivo
+        if arquivo.name.endswith('.xlsx'):
+            df_raw = pd.read_excel(arquivo)
+        else:
+            df_raw = pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
 
-        dados_finais = {}
-        forn_atual = None
+        # 1. PEGAR NOME DA EMPRESA (Geralmente no topo)
+        linha_cabecalho = " ".join([str(v) for v in df_raw.iloc[0:2].values.flatten() if pd.notna(v)])
+        empresa_nome = "EMPRESA NÃO IDENTIFICADA"
+        if "EMPRESA:" in linha_cabecalho.upper():
+            empresa_nome = linha_cabecalho.upper().split("EMPRESA:")[-1].split("CNPJ:")[0].strip()
 
-        for i, linha in df.iterrows():
-            texto_linha = " ".join([str(v) for v in linha.values if pd.notna(v)]).upper()
+        resumo_por_fornecedor = {}
+        fornecedor_atual = None
+
+        for i, linha in df_raw.iterrows():
+            # Transforma a linha em texto para busca
+            texto_da_linha = " ".join([str(v) for v in linha.values if pd.notna(v)]).upper()
             
-            # Identifica início de novo fornecedor
-            if "CONTA:" in texto_linha:
-                cod = re.search(r'CONTA:\s*(\d+)', texto_linha)
-                cod_val = cod.group(1) if cod else ""
-                nome_bruto = texto_linha.split("CONTA:")[-1].replace('NOME:', '').strip()
-                # Limpa o nome tirando números de conta repetidos e NANs
-                nome_limpo = limpar(re.sub(r'(\d+\.)+\d+', '', nome_bruto).replace(cod_val, ''))
-                forn_atual = f"{cod_val} - {nome_limpo}"
-                dados_finais[forn_atual] = []
+            # 2. DETECTAR FORNECEDOR (E limpar os NANs do nome)
+            if "CONTA:" in texto_da_linha:
+                cod_match = re.search(r'CONTA:\s*(\d+)', texto_da_linha)
+                cod_conta = cod_match.group(1) if cod_match else ""
+                
+                # Pega o que vem depois de CONTA: ou NOME:
+                partes_nome = texto_da_linha.split("CONTA:")[-1]
+                nome_limpo = limpar_sujeira(partes_nome.replace(cod_conta, "").replace("NOME:", ""))
+                
+                fornecedor_atual = f"{cod_conta} - {nome_limpo}" if cod_conta else nome_limpo
+                resumo_por_fornecedor[fornecedor_atual] = []
             
-            # Identifica linhas de valores (pela data na primeira coluna)
-            elif forn_atual and ("/" in str(linha.iloc[0]) or "-" in str(linha.iloc[0])):
-                def num(v):
-                    try: return float(str(v).replace('.','').replace(',','.'))
+            # 3. CAPTURAR LANÇAMENTOS (Linhas que começam com data)
+            elif fornecedor_atual and ("/" in str(linha.iloc[0])):
+                def converter_valor(v):
+                    try: return float(str(v).replace('.', '').replace(',', '.'))
                     except: return 0.0
                 
-                v_deb = num(linha.iloc[8])
-                v_cre = num(linha.iloc[9])
+                deb = converter_valor(linha.iloc[8])
+                cre = converter_valor(linha.iloc[9])
                 
-                if v_deb > 0 or v_cre > 0:
-                    dados_finais[forn_atual].append({
+                if deb > 0 or cre > 0:
+                    resumo_por_fornecedor[fornecedor_atual].append({
                         'Data': linha.iloc[0],
-                        'Histórico': limpar(linha.iloc[2]),
-                        'Débito': v_deb,
-                        'Crédito': v_cre
+                        'Histórico': limpar_sujeira(linha.iloc[2]),
+                        'Débito': deb,
+                        'Crédito': cre
                     })
 
-        saida_excel = io.BytesIO()
-        with pd.ExcelWriter(saida_excel, engine='openpyxl') as writer:
-            for forn, itens in dados_finais.items():
-                if not itens: continue
+        # GERAR EXCEL FINAL
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for forn, lancamentos in resumo_por_fornecedor.items():
+                if not lancamentos: continue
                 
-                df_temp = pd.DataFrame(itens)
+                # Criar Aba (nome limitado a 31 caracteres)
                 nome_aba = re.sub(r'[\\/*?:\[\]]', '', forn)[:31]
-                df_temp.to_excel(writer, sheet_name=nome_aba, index=False, startrow=9, startcol=1)
+                df_f = pd.DataFrame(lancamentos)
+                df_f.to_excel(writer, sheet_name=nome_aba, index=False, startrow=9, startcol=1)
                 
                 ws = writer.sheets[nome_aba]
+                alinhamento_esquerda = Alignment(horizontal='left', vertical='center')
                 
-                # Limpa o fundo (tudo branco)
-                for r in range(1, 100):
-                    for c in range(1, 15): ws.cell(row=r, column=c).fill = PatternFill("solid", fgColor="FFFFFF")
+                # Aplicar Fundo Branco e Alinhamento
+                for r in range(1, 50):
+                    for c in range(1, 15):
+                        ws.cell(row=r, column=c).fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
 
-                # Cabeçalhos Alinhados à Esquerda
-                ws['B2'] = nome_empresa
-                ws['B2'].font = Font(bold=True, size=12)
+                # Escrever Cabeçalhos com Alinhamento à Esquerda
+                ws['B2'] = f"EMPRESA: {empresa_nome}"
+                ws['B2'].font = Font(bold=True, size=11)
+                ws['B2'].alignment = alinhamento_esquerda
+                
+                ws['B4'] = f"FORNECEDOR: {forn}"
+                ws['B4'].font = Font(bold=True, size=13)
+                ws['B4'].alignment = alinhamento_esquerda
+                
+                # Títulos de Saldo
+                ws.cell(row=6, column=4, value="SALDO ANTERIOR:").font = Font(bold=True)
+                ws.cell(row=8, column=4, value="TOTAIS DO PERÍODO:").font = Font(bold=True)
+
+                # Ajustar largura das colunas
+                ws.column_dimensions['B'].width = 15 # Data
+                ws.column_dimensions['C'].width = 65 # Histórico
+                ws.column_dimensions['D'].width = 15 # Débito
+                ws.column_dimensions['E'].width = 15 # Crédito
+
+        st.success("✅ Processado com sucesso! Os 'NAN' foram removidos.")
+        st.download_button("📥 Baixar Planilha Limpa", output.getvalue(), "conciliacao_organizada.xlsx")
+
+    except Exception as e:
+        st.error(f"Ocorreu um erro no processamento: {e}")
