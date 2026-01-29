@@ -2,85 +2,87 @@ import streamlit as st
 import pandas as pd
 import re
 
-st.set_page_config(page_title="Conciliador de Fornecedores", layout="wide")
+st.set_page_config(page_title="Conciliador Domínio", layout="wide")
 
-st.title("📑 Conciliação por Fornecedor (Domínio)")
+st.title("🤖 Robô de Conciliação (Excel)")
 
-arquivo = st.file_uploader("Suba o arquivo Razão do Domínio (CSV)", type=["csv"])
+# 1. O robô agora aceita arquivos .xlsx
+arquivo = st.file_uploader("Suba o Razão do Domínio (Excel)", type=["xlsx"])
 
 if arquivo:
-    # Lendo o arquivo
-    df = pd.read_csv(arquivo, skip_blank_lines=True)
+    # Lendo o Excel (usando o motor openpyxl)
+    df = pd.read_excel(arquivo, engine='openpyxl')
     
-    # Dicionário para guardar os dados de cada fornecedor
     banco_fornecedores = {}
     fornecedor_atual = None
     dados_acumulados = []
 
-    # --- PARTE 1: O Robô Detetive separa os dados ---
+    # 2. O Robô Detetive limpa e organiza
     for _, linha in df.iterrows():
-        # Identifica a linha de "Conta:" que tem o nome do fornecedor
-        if str(linha[0]).startswith("Conta:"):
-            # Se já vínhamos guardando dados de outro fornecedor, salva antes de mudar
+        # Identifica a linha que tem o nome do fornecedor (Coluna 'Data' diz "Conta:")
+        if str(linha.iloc[0]).strip().startswith("Conta:"):
             if fornecedor_atual and dados_acumulados:
                 banco_fornecedores[fornecedor_atual] = pd.DataFrame(dados_acumulados)
             
-            # Pega o nome do novo fornecedor
-            fornecedor_atual = str(linha[5]) if pd.notna(linha[5]) else str(linha[2])
+            # Pega o nome do fornecedor que geralmente está na coluna 5 ou 6
+            fornecedor_atual = str(linha.iloc[5]) if pd.notna(linha.iloc[5]) else "Desconhecido"
             dados_acumulados = []
             continue
         
-        # Se a linha tem data (formato AAAA-MM-DD), é um movimento
-        if pd.notna(linha[0]) and re.match(r'\d{4}-\d{2}-\d{2}', str(linha[0])):
-            debito = float(str(linha[8]).replace(',', '.')) if pd.notna(linha[8]) else 0
-            credito = float(str(linha[9]).replace(',', '.')) if pd.notna(linha[9]) else 0
+        # Verifica se a linha tem uma data válida para ser um movimento
+        if pd.notna(linha.iloc[0]) and any(char.isdigit() for char in str(linha.iloc[0])):
+            # Pega os valores de Débito e Crédito
+            deb = float(linha.iloc[8]) if pd.notna(linha.iloc[8]) else 0
+            cre = float(linha.iloc[9]) if pd.notna(linha.iloc[9]) else 0
             
-            # Tenta extrair o número da nota do histórico
-            historico = str(linha[2])
-            nfe = re.findall(r'NFe\s(\d+)', historico)
+            # Tenta achar o número da nota no histórico
+            historico = str(linha.iloc[2])
+            nfe = re.findall(r'NFe\s?(\d+)', historico)
             num_nota = nfe[0] if nfe else "S/N"
             
             dados_acumulados.append({
-                "Data": linha[0],
+                "Data": linha.iloc[0],
                 "Histórico": historico,
                 "NF": num_nota,
-                "Débito (Pago)": debito,
-                "Crédito (Comprou)": credito
+                "Débito (Pago)": deb,
+                "Crédito (Comprou)": cre
             })
-    
-    # Salva o último fornecedor da lista
-    if fornecedor_atual:
+
+    # Salva o último fornecedor
+    if fornecedor_atual and dados_acumulados:
         banco_fornecedores[fornecedor_atual] = pd.DataFrame(dados_acumulados)
 
-    # --- PARTE 2: Criando as abas e colocando lado a lado ---
+    # 3. Criando as Abas e Colunas lado a lado
     if banco_fornecedores:
-        nomes_fornecedores = list(banco_fornecedores.keys())
-        abas = st.tabs(nomes_fornecedores) # Cria uma aba para cada nome
+        nomes = list(banco_fornecedores.keys())
+        tabs = st.tabs(nomes)
 
-        for i, nome in enumerate(nomes_fornecedores):
-            with abas[i]:
-                st.subheader(f"Fornecedor: {nome}")
+        for i, nome in enumerate(nomes):
+            with tabs[i]:
+                st.subheader(f"🏢 {nome}")
                 
+                # Prepara o Razão e a Conciliação
                 df_razao = banco_fornecedores[nome]
-                
-                # Criando a Conciliação (Resumo por Nota)
-                df_conciliado = df_razao.groupby("NF").agg({
+                df_conc = df_razao.groupby("NF").agg({
                     "Débito (Pago)": "sum",
                     "Crédito (Comprou)": "sum"
                 }).reset_index()
-                df_conciliado["Diferença"] = df_conciliado["Débito (Pago)"] - df_conciliado["Crédito (Comprou)"]
-                df_conciliado["Status"] = df_conciliado["Diferença"].apply(lambda x: "✅ OK" if x == 0 else "🚩 Erro")
+                
+                df_conc["Diferença"] = df_conc["Débito (Pago)"] - df_conc["Crédito (Comprou)"]
+                df_conc["Status"] = df_conc["Diferença"].apply(lambda x: "✅ OK" if abs(x) < 0.01 else "🚩 Divergente")
 
-                # Juntando Razão + 3 Colunas Vazias + Conciliação
-                espaco_vazio = pd.DataFrame({"": [""] * len(df_razao)})
+                # Divide a tela em duas colunas (Razão | Conciliação)
+                col_razao, col_espaco, col_conc = st.columns([1.5, 0.2, 1])
                 
-                # Criando a visualização lado a lado usando colunas do Streamlit
-                col_esq, col_dir = st.columns([1.5, 1]) # O Razão é maior que a Conciliação
+                with col_razao:
+                    st.markdown("### 📄 Razão")
+                    st.dataframe(df_razao, use_container_width=True, hide_index=True)
                 
-                with col_esq:
-                    st.write("**📄 Razão Detalhado**")
-                    st.dataframe(df_razao, use_container_width=True)
+                # A col_espaco fica vazia para "pular" as colunas que você pediu
                 
-                with col_dir:
-                    st.write("**⚖️ Conciliação (Resumo)**")
-                    st.dataframe(df_conciliado, use_container_width=True)
+                with col_conc:
+                    st.markdown("### ⚖️ Conciliação")
+                    st.dataframe(df_conc, use_container_width=True, hide_index=True)
+                    
+                    # Resumo rápido embaixo da conciliação
+                    st.info(f"Saldo Geral deste Fornecedor: R$ {df_conc['Diferença'].sum():,.2f}")
