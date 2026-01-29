@@ -5,7 +5,7 @@ import re
 from openpyxl.styles import Font
 
 st.set_page_config(page_title="Conciliador Contábil Pro", layout="wide")
-st.title("🤖 Conciliador: Limpeza Total e Totais Alinhados")
+st.title("🤖 Conciliador: Layout de Topo Personalizado")
 
 arquivo = st.file_uploader("Suba o Razão do Domínio aqui", type=["csv", "xlsx"])
 
@@ -14,15 +14,12 @@ def extrair_nfe(texto):
     return match.group(1) if match else "(vazio)"
 
 def limpar_nome_simples(linha_txt):
-    # Remove o termo 'nan' que aparece em campos vazios
-    linha_txt = str(linha_txt).replace('nan', '').replace('NAN', '')
+    linha_txt = str(linha_txt).replace('nan', '').replace('NAN', '').replace('NaN', '')
     match_cod = re.search(r'CONTA:\s*(\d+)', linha_txt)
     codigo = match_cod.group(1) if match_cod else ""
-    
     nome = linha_txt.split("CONTA:")[-1]
     nome = re.sub(r'(\d+\.)+\d+', '', nome) 
     nome = nome.replace(codigo, '').replace('NOME:', '').strip()
-    # Remove traços ou caracteres estranhos que sobraram
     nome = re.sub(r'^[ \-_]+', '', nome)
     return f"{codigo} - {nome}" if codigo else nome
 
@@ -37,7 +34,6 @@ if arquivo is not None:
         fornecedor_atual = None
 
         for i, linha in df_raw.iterrows():
-            # Limpa 'nan' de toda a linha antes de processar
             valores_limpos = [str(v).replace('nan', '').strip() for v in linha.values]
             linha_txt = " ".join(valores_limpos).upper()
             
@@ -70,55 +66,61 @@ if arquivo is not None:
                 
                 df_f = pd.DataFrame(lancamentos)
                 df_c = df_f.groupby('Nº NF').agg({'Débito': 'sum', 'Crédito': 'sum'}).reset_index()
-                df_c['DIFERENÇA'] = df_c['Crédito'] - df_f['Débito'].sum() # Regra do seu saldo
                 df_c['DIFERENÇA'] = df_c['Crédito'] - df_c['Débito']
                 df_c['STATUS'] = df_c['DIFERENÇA'].apply(lambda x: "OK" if abs(x) < 0.05 else "DIVERGENTE")
                 
                 nome_aba = re.sub(r'[\\/*?:\[\]]', '', forn)[:31]
                 
-                # Inicia as tabelas na linha 6 para dar espaço ao topo
+                # Inicia as tabelas na linha 6
                 df_f.to_excel(writer, sheet_name=nome_aba, index=False, startrow=5)
                 df_c.to_excel(writer, sheet_name=nome_aba, index=False, startrow=5, startcol=8)
                 
                 sheet = writer.sheets[nome_aba]
                 fmt_contabil = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
                 negrito = Font(bold=True)
+                cor_vermelha = Font(bold=True, color="FF0000")
+                cor_verde = Font(bold=True, color="00B050")
 
-                # --- LINHA 1: NOME DO FORNECEDOR ---
+                # --- LINHA 1: NOME ---
                 sheet.cell(row=1, column=1, value=forn).font = negrito
 
-                # --- LINHA 3: TÍTULO TOTAIS ---
-                sheet.cell(row=3, column=1, value="TOTAIS").font = negrito
+                # --- LINHA 3: TÍTULOS ---
+                sheet.cell(row=3, column=4, value="TOTAIS").font = negrito # Coluna D
+                sheet.cell(row=3, column=5, value="TOTAIS").font = negrito # Coluna E
+                sheet.cell(row=3, column=6, value="SALDO").font = negrito # Coluna F
 
-                # --- LINHA 4: APENAS OS VALORES ---
-                # Valor Débito em cima da coluna E (5)
-                c_deb_topo = sheet.cell(row=4, column=5, value=df_f['Débito'].sum())
-                c_deb_topo.number_format = fmt_contabil
-                c_deb_topo.font = negrito
+                # --- LINHA 4: VALORES DO RAZÃO ---
+                val_deb = sheet.cell(row=4, column=4, value=df_f['Débito'].sum()) # Coluna D
+                val_cre = sheet.cell(row=4, column=5, value=df_f['Crédito'].sum()) # Coluna E
+                val_deb.number_format = val_cre.number_format = fmt_contabil
+                val_deb.font = val_cre.font = negrito
 
-                # Valor Crédito em cima da coluna F (6)
-                c_cre_topo = sheet.cell(row=4, column=6, value=df_f['Crédito'].sum())
-                c_cre_topo.number_format = fmt_contabil
-                c_cre_topo.font = negrito
-
-                # Valor Diferença em cima da coluna L (12)
                 saldo = df_f['Crédito'].sum() - df_f['Débito'].sum()
-                c_dif_topo = sheet.cell(row=4, column=12, value=saldo)
-                c_dif_topo.number_format = fmt_contabil
-                c_dif_topo.font = Font(bold=True, color="FF0000" if saldo < 0 else "00B050")
+                val_saldo = sheet.cell(row=4, column=6, value=saldo) # Coluna F
+                val_saldo.number_format = fmt_contabil
+                val_saldo.font = cor_vermelha if saldo < 0 else cor_verde
 
-                # Formatação Contábil do corpo
+                # --- LINHA 4: CONCILIAÇÃO ---
+                sheet.cell(row=4, column=12, value="SALDO ABERTO").font = negrito # Coluna L
+                c_conc_saldo = sheet.cell(row=4, column=13, value=saldo) # Coluna M
+                c_conc_saldo.number_format = fmt_contabil
+                c_conc_saldo.font = cor_vermelha if saldo < 0 else cor_verde
+
+                # Formatação do corpo das tabelas
                 for r in range(7, len(df_f) + 7):
                     sheet.cell(row=r, column=5).number_format = fmt_contabil
                     sheet.cell(row=r, column=6).number_format = fmt_contabil
-
+                
                 for r in range(7, len(df_c) + 7):
                     sheet.cell(row=r, column=10).number_format = fmt_contabil
                     sheet.cell(row=r, column=11).number_format = fmt_contabil
                     sheet.cell(row=r, column=12).number_format = fmt_contabil
+                    # Cores no status
+                    st_cell = sheet.cell(row=r, column=13)
+                    st_cell.font = Font(color="00B050") if st_cell.value == "OK" else Font(color="FF0000")
 
-        st.success("✅ Relatório Processado!")
-        st.download_button("📥 Baixar Planilha Limpa", data=output.getvalue(), file_name="conciliacao_limpa.xlsx")
+        st.success("✅ Relatório formatado com sucesso!")
+        st.download_button("📥 Baixar Excel Ajustado", data=output.getvalue(), file_name="conciliacao_alinhada.xlsx")
             
     except Exception as e:
         st.error(f"Erro: {e}")
