@@ -32,19 +32,16 @@ if arquivo is not None:
                 continue
 
             # 2. Só processa valores se a linha tiver uma DATA (evita lixo e totais)
-            # Procuramos por algo no formato 00/00/0000 nas primeiras colunas
             tem_data = any("/20" in str(val) for val in linha.values[:3])
             
             if tem_data:
-                # Tenta localizar as colunas de Débito e Crédito por posição no seu arquivo
-                # Geralmente no seu CSV são as colunas 4 e 5 (ou E e F)
                 try:
-                    # Convertendo para número, tratando vírgulas se necessário
                     def limpar_valor(val):
                         if pd.isna(val): return 0
                         v = str(val).replace('.', '').replace(',', '.')
                         return pd.to_numeric(v, errors='coerce') or 0
 
+                    # No seu arquivo, Débito e Crédito costumam ser as colunas 4 e 5
                     deb = limpar_valor(linha.iloc[4]) if len(linha) > 4 else 0
                     cre = limpar_valor(linha.iloc[5]) if len(linha) > 5 else 0
                     
@@ -62,10 +59,9 @@ if arquivo is not None:
             resumo = df_resumo.groupby('Fornecedor').agg({'Débito': 'sum', 'Crédito': 'sum'}).reset_index()
             resumo['Saldo Final'] = resumo['Crédito'] - resumo['Débito']
 
-            st.success("✅ Processado com sucesso!")
+            st.success("✅ Agora sim! Processado com sucesso!")
             st.dataframe(resumo.style.format({'Débito': 'R$ {:.2f}', 'Crédito': 'R$ {:.2f}', 'Saldo Final': 'R$ {:.2f}'}))
 
-            # Gerar Excel para download
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 resumo.to_excel(writer, index=False)
@@ -77,7 +73,7 @@ if arquivo is not None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.error("❌ Não encontrei lançamentos válidos. O formato do arquivo pode ter mudado.")
+            st.error("❌ Não encontrei lançamentos válidos. Verifique se o arquivo está no formato correto.")
 
     except Exception as e:
         st.error(f"Erro técnico: {e}")
