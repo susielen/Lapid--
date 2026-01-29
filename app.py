@@ -118,3 +118,31 @@ if arquivo is not None:
                 # --- 3. CABEÇALHOS (CINZA) ---
                 for col_idx in range(1, 14):
                     celula = sheet.cell(row=6, column=col_idx)
+                    if celula.value:
+                        celula.fill = preenchimento_cinza
+                        celula.font = Font(bold=True)
+
+                # --- 4. FORMATO CONTÁBIL ---
+                for r in range(7, len(df_f) + 7):
+                    sheet.cell(row=r, column=5).number_format = fmt_contabil
+                    sheet.cell(row=r, column=6).number_format = fmt_contabil
+                
+                for r in range(7, len(df_c) + 7):
+                    for c_idx in [10, 11, 12]:
+                        sheet.cell(row=r, column=c_idx).number_format = fmt_contabil
+                    st_cell = sheet.cell(row=r, column=13)
+                    st_cell.font = Font(color="00B050") if st_cell.value == "OK" else Font(color="FF0000")
+
+                # --- 5. AJUSTE DE LARGURA ---
+                for column in sheet.columns:
+                    col_letter = get_column_letter(column[0].column)
+                    if col_letter == 'A': sheet.column_dimensions[col_letter].width = 12
+                    elif col_letter in ['G', 'H']: sheet.column_dimensions[col_letter].width = 4
+                    elif col_letter == 'C': sheet.column_dimensions[col_letter].width = 45
+                    else: sheet.column_dimensions[col_letter].width = 18
+
+        st.success("✅ Relatório gerado com sucesso!")
+        st.download_button("📥 Baixar Planilha", data=output.getvalue(), file_name="conciliacao.xlsx")
+            
+    except Exception as e:
+        st.error(f"Erro inesperado: {e}")
