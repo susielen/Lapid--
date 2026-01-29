@@ -3,9 +3,10 @@ import pandas as pd
 import io
 import re
 from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Conciliador Contábil Pro", layout="wide")
-st.title("🤖 Conciliador: Cores por Tipo de Lançamento")
+st.title("🤖 Conciliador: Formato Contábil e Ajuste Automático")
 
 arquivo = st.file_uploader("Suba o Razão do Domínio aqui", type=["csv", "xlsx"])
 
@@ -85,51 +86,55 @@ if arquivo is not None:
                 cor_vermelha = Font(bold=True, color="FF0000")
                 cor_verde = Font(bold=True, color="00B050")
 
-                # --- LINHA 1 ---
+                # --- TOPO ---
                 sheet.cell(row=1, column=1, value=forn).font = negrito
-
-                # --- LINHA 3 ---
                 sheet.cell(row=3, column=4, value="TOTAIS").font = negrito
                 sheet.cell(row=3, column=6, value="SALDO").font = negrito
 
-                # --- LINHA 4: VALORES COLORIDOS ---
-                # Débito (D) em Vermelho
-                val_deb = sheet.cell(row=4, column=4, value=df_f['Débito'].sum())
-                val_deb.number_format = fmt_contabil
-                val_deb.font = cor_vermelha
+                # VALORES TOPO
+                v_deb = sheet.cell(row=4, column=4, value=df_f['Débito'].sum())
+                v_deb.number_format = fmt_contabil
+                v_deb.font = cor_vermelha
 
-                # Crédito (E) em Verde
-                val_cre = sheet.cell(row=4, column=5, value=df_f['Crédito'].sum())
-                val_cre.number_format = fmt_contabil
-                val_cre.font = cor_verde
+                v_cre = sheet.cell(row=4, column=5, value=df_f['Crédito'].sum())
+                v_cre.number_format = fmt_contabil
+                v_cre.font = cor_verde
                 
-                # Saldo (F) Dinâmico
                 saldo = df_f['Crédito'].sum() - df_f['Débito'].sum()
-                val_saldo = sheet.cell(row=4, column=6, value=saldo)
-                val_saldo.number_format = fmt_contabil
-                val_saldo.font = cor_vermelha if saldo < 0 else cor_verde
+                v_saldo = sheet.cell(row=4, column=6, value=saldo)
+                v_saldo.number_format = fmt_contabil
+                v_saldo.font = cor_vermelha if saldo < 0 else cor_verde
 
-                # Conciliação no topo
-                sheet.cell(row=4, column=12, value="SALDO ABERTO").font = negrito
-                c_conc_saldo = sheet.cell(row=4, column=13, value=saldo)
-                c_conc_saldo.number_format = fmt_contabil
-                c_conc_saldo.font = cor_vermelha if saldo < 0 else cor_verde
+                # CONCILIAÇÃO TOPO
+                sheet.cell(row=4, column=12, value="Saldo").font = negrito
+                v_conc = sheet.cell(row=4, column=13, value=saldo)
+                v_conc.number_format = fmt_contabil
+                v_conc.font = cor_vermelha if saldo < 0 else cor_verde
 
-                # Formatação do corpo
+                # FORMATAR COLUNAS E VALORES DO CORPO
                 for r in range(7, len(df_f) + 7):
-                    sheet.cell(row=r, column=1).number_format = 'dd/mm/yy'
                     sheet.cell(row=r, column=5).number_format = fmt_contabil
                     sheet.cell(row=r, column=6).number_format = fmt_contabil
                 
                 for r in range(7, len(df_c) + 7):
-                    sheet.cell(row=r, column=10).number_format = fmt_contabil
-                    sheet.cell(row=r, column=11).number_format = fmt_contabil
-                    sheet.cell(row=r, column=12).number_format = fmt_contabil
+                    for col in [10, 11, 12]:
+                        sheet.cell(row=r, column=col).number_format = fmt_contabil
                     st_cell = sheet.cell(row=r, column=13)
                     st_cell.font = Font(color="00B050") if st_cell.value == "OK" else Font(color="FF0000")
 
-        st.success("✅ Relatório Contábil Colorido Pronto!")
-        st.download_button("📥 Baixar Excel Final", data=output.getvalue(), file_name="conciliacao_dominio_cores.xlsx")
+                # AJUSTE AUTOMÁTICO DE LARGURA
+                for column in sheet.columns:
+                    max_length = 0
+                    column_letter = get_column_letter(column[0].column)
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except: pass
+                    sheet.column_dimensions[column_letter].width = max_length + 2
+
+        st.success("✅ Relatório Contábil Profissional Gerado!")
+        st.download_button("📥 Baixar Excel Final", data=output.getvalue(), file_name="conciliacao_final_perfeita.xlsx")
             
     except Exception as e:
         st.error(f"Erro: {e}")
