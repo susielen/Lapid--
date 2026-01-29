@@ -3,19 +3,22 @@ import pandas as pd
 import io
 import re
 
-st.set_page_config(page_title="Conciliador Pro", layout="wide")
-st.title("🤖 Conciliador de Fornecedores (Modelo Razão/Conciliação)")
+st.set_page_config(page_title="Conciliador Domínio", layout="wide")
+st.title("🤖 Conciliador Estilo 'CONCILIAÇÃO NOVO'")
 
-arquivo = st.file_uploader("Suba o arquivo Razão do Domínio aqui", type=["csv", "xlsx"])
+arquivo = st.file_uploader("Suba o Razão (Excel ou CSV) aqui", type=["csv", "xlsx"])
 
-def extrair_nota(texto):
-    # Procura padrões de nota fiscal no histórico (ex: NFe 1234, NF 567)
-    match = re.search(r'(?:NF|NFE|NF-E|NOTA|Nº)\s*(\d+)', str(texto).upper())
-    return match.group(1) if match else "(vazio)"
+def extrair_nfe(texto):
+    texto = str(texto).upper()
+    # Busca números após NFe, NF, Nota ou Nº
+    match = re.search(r'(?:NFE|NF|NOTA|Nº|NFE\s)\s*(\d+)', texto)
+    if match:
+        return match.group(1)
+    return "(vazio)"
 
 if arquivo is not None:
     try:
-        # 1. LEITURA DOS DADOS
+        # Lendo o arquivo sem pular linhas fixas (vamos procurar o cabeçalho)
         if arquivo.name.endswith('.xlsx'):
             df_raw = pd.read_excel(arquivo)
         else:
@@ -24,72 +27,73 @@ if arquivo is not None:
         lista_razao = []
         fornecedor_atual = "Não Identificado"
 
-        # 2. PROCESSAMENTO (ESTILO RAZÃO FORNECEDOR)
-        for _, linha in df_raw.iterrows():
-            texto_linha = " ".join([str(v) for v in linha.values]).upper()
+        for i, linha in df_raw.iterrows():
+            # Transforma a linha em texto para busca
+            linha_txt = " ".join([str(v) for v in linha.values]).upper()
             
-            # Identifica novo fornecedor
-            if "CONTA:" in texto_linha:
-                fornecedor_atual = texto_linha.split("CONTA:")[-1].strip()
+            # 1. Identifica o Fornecedor (procura pela palavra 'Conta:')
+            if "CONTA:" in linha_txt:
+                fornecedor_atual = linha_txt.split("CONTA:")[-1].strip()
                 continue
             
-            # Verifica se é linha de lançamento (tem data)
-            tem_data = any("/20" in str(v) for v in linha.values[:3])
-            if tem_data:
-                hist = str(linha.iloc[2]) # Coluna Histórico
-                nf = extrair_nota(hist)
+            # 2. Identifica se é linha de valores (procura por data ex: 2025-01-03)
+            # No Domínio, a data costuma estar na primeira coluna
+            data_val = str(linha.iloc[0])
+            if "/" in data_val or (len(data_val) >= 8 and "-" in data_val):
                 
-                # Limpeza de valores
-                def limpar(v):
-                    v = str(v).replace('.', '').replace(',', '.')
+                hist = str(linha.iloc[2]) # Histórico geralmente é a 3ª coluna
+                num_nf = extrair_nfe(hist)
+                
+                def converter_valor(val):
+                    if pd.isna(val): return 0
+                    v = str(val).replace('.', '').replace(',', '.')
                     return pd.to_numeric(v, errors='coerce') or 0
 
-                deb = limpar(linha.iloc[8]) # Débito costuma ser coluna 8 no Razão Domínio
-                cre = limpar(linha.iloc[9]) # Crédito costuma ser coluna 9
+                # No seu arquivo TESTE: Débito é col 8, Crédito é col 9
+                deb = converter_valor(linha.iloc[8]) if len(linha) > 8 else 0
+                cre = converter_valor(linha.iloc[9]) if len(linha) > 9 else 0
 
                 if deb > 0 or cre > 0:
                     lista_razao.append({
                         'Fornecedor': fornecedor_atual,
-                        'Data': linha.iloc[0],
+                        'Data': data_val,
+                        'Nº NF': num_nf,
                         'Histórico': hist,
-                        'Nº NF': nf,
                         'Débito': deb,
                         'Crédito': cre
                     })
 
         if lista_razao:
-            df_razao = pd.DataFrame(lista_razao)
+            df_final_razao = pd.DataFrame(lista_razao)
 
-            # 3. CRIAÇÃO DA ABA CONCILIAÇÃO
-            # Agrupamos por Fornecedor e Nota Fiscal
-            df_conciliacao = df_razao.groupby(['Fornecedor', 'Nº NF']).agg({
+            # Criando a Aba CONCILIAÇÃO (Agrupado por Fornecedor e NF)
+            df_concilia = df_final_razao.groupby(['Fornecedor', 'Nº NF']).agg({
                 'Débito': 'sum',
                 'Crédito': 'sum'
             }).reset_index()
+            
+            df_concilia['DIFERENÇA'] = df_concilia['Crédito'] - df_concilia['Débito']
+            df_concilia['STATUS'] = df_concilia['DIFERENÇA'].apply(lambda x: "OK" if abs(x) < 0.05 else "DIVERGENTE")
 
-            df_conciliacao['DIFERENÇA'] = df_conciliacao['Crédito'] - df_conciliacao['Débito']
-            df_conciliacao['STATUS'] = df_conciliacao['DIFERENÇA'].apply(lambda x: "OK" if abs(x) < 0.01 else "DIVERGENTE")
-
-            # EXIBIÇÃO NO SITE
-            tab1, tab2 = st.tabs(["📋 Razão Detalhado", "⚖️ Conciliação (Status)"])
+            # Exibição
+            tab1, tab2 = st.tabs(["📄 Razão Processado", "⚖️ Aba Conciliação"])
             
             with tab1:
-                st.subheader("Visualização estilo 'Razão Fornecedor'")
-                st.dataframe(df_razao)
-
+                st.dataframe(df_final_razao, use_container_width=True)
+            
             with tab2:
-                st.subheader("Visualização estilo 'Conciliação'")
-                st.dataframe(df_conciliacao)
+                st.dataframe(df_concilia, use_container_width=True)
 
-            # DOWNLOAD
+            # Botão de Download com as duas abas
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_razao.to_excel(writer, sheet_name='RAZÃO FORNECEDOR', index=False)
-                df_conciliacao.to_excel(writer, sheet_name='CONCILIAÇÃO', index=False)
+                df_final_razao.to_excel(writer, sheet_name='RAZÃO FORNECEDOR', index=False)
+                df_concilia.to_excel(writer, sheet_name='CONCILIAÇÃO', index=False)
             
-            st.download_button("📥 Baixar Planilha Pronta", data=output.getvalue(), file_name="conciliacao_feita.xlsx")
+            st.download_button("📥 Baixar Planilha Conciliada", data=output.getvalue(), file_name="resultado_conciliacao.xlsx")
+            
         else:
-            st.warning("Não foi possível identificar lançamentos no arquivo.")
+            st.error("❌ O robô leu o arquivo, mas não encontrou o padrão de 'Data' e 'Valores'. Verifique se é o Razão do Domínio.")
 
     except Exception as e:
-        st.error(f"Erro: {e}")
+        st.error(f"Erro ao processar: {e}")
