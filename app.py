@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 import io
 import re
-from openpyxl.styles import Font
+from openpyxl.styles import Font, Alignment
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Conciliador Contábil Pro", layout="wide")
-st.title("🤖 Conciliador: Formato Contábil e Ajuste Automático")
+st.title("🤖 Conciliador: Layout Premium sem Erros")
 
 arquivo = st.file_uploader("Suba o Razão do Domínio aqui", type=["csv", "xlsx"])
 
@@ -82,59 +82,55 @@ if arquivo is not None:
                 
                 sheet = writer.sheets[nome_aba]
                 fmt_contabil = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
-                negrito = Font(bold=True)
-                cor_vermelha = Font(bold=True, color="FF0000")
-                cor_verde = Font(bold=True, color="00B050")
+                
+                # --- MESCLAR NOME NO TOPO ---
+                sheet.merge_cells('A1:G1')
+                celula_titulo = sheet['A1']
+                celula_titulo.value = forn
+                celula_titulo.font = Font(bold=True, size=14)
+                celula_titulo.alignment = Alignment(horizontal='center')
 
-                # --- TOPO ---
-                sheet.cell(row=1, column=1, value=forn).font = negrito
-                sheet.cell(row=3, column=4, value="TOTAIS").font = negrito
-                sheet.cell(row=3, column=6, value="SALDO").font = negrito
+                # --- TOTAIS ---
+                sheet.cell(row=3, column=4, value="TOTAIS").font = Font(bold=True)
+                sheet.cell(row=3, column=6, value="SALDO").font = Font(bold=True)
 
                 # VALORES TOPO
-                v_deb = sheet.cell(row=4, column=4, value=df_f['Débito'].sum())
-                v_deb.number_format = fmt_contabil
-                v_deb.font = cor_vermelha
-
-                v_cre = sheet.cell(row=4, column=5, value=df_f['Crédito'].sum())
-                v_cre.number_format = fmt_contabil
-                v_cre.font = cor_verde
+                for col, val, cor in [(4, df_f['Débito'].sum(), "FF0000"), (5, df_f['Crédito'].sum(), "00B050")]:
+                    c = sheet.cell(row=4, column=col, value=val)
+                    c.number_format = fmt_contabil
+                    c.font = Font(bold=True, color=cor)
                 
                 saldo = df_f['Crédito'].sum() - df_f['Débito'].sum()
                 v_saldo = sheet.cell(row=4, column=6, value=saldo)
                 v_saldo.number_format = fmt_contabil
-                v_saldo.font = cor_vermelha if saldo < 0 else cor_verde
+                v_saldo.font = Font(bold=True, color="FF0000" if saldo < 0 else "00B050")
 
                 # CONCILIAÇÃO TOPO
-                sheet.cell(row=4, column=12, value="Saldo").font = negrito
+                sheet.cell(row=4, column=12, value="Saldo").font = Font(bold=True)
                 v_conc = sheet.cell(row=4, column=13, value=saldo)
                 v_conc.number_format = fmt_contabil
-                v_conc.font = cor_vermelha if saldo < 0 else cor_verde
+                v_conc.font = Font(bold=True, color="FF0000" if saldo < 0 else "00B050")
 
-                # FORMATAR COLUNAS E VALORES DO CORPO
-                for r in range(7, len(df_f) + 7):
-                    sheet.cell(row=r, column=5).number_format = fmt_contabil
-                    sheet.cell(row=r, column=6).number_format = fmt_contabil
-                
+                # --- REMOVER ALERTAS E AJUSTAR COLUNAS ---
+                # Ignorar erros de números armazenados como texto
+                sheet.add_ignore_error('A1:Z500', numberStoredAsText=True)
+
+                for column in sheet.columns:
+                    column_letter = get_column_letter(column[0].column)
+                    if column_letter == 'A': # Coluna Data
+                        sheet.column_dimensions[column_letter].width = 12
+                    elif column_letter == 'C': # Coluna Histórico (Mais larga)
+                        sheet.column_dimensions[column_letter].width = 40
+                    else:
+                        sheet.column_dimensions[column_letter].width = 18
+
+                # Formatação das cores de status no corpo
                 for r in range(7, len(df_c) + 7):
-                    for col in [10, 11, 12]:
-                        sheet.cell(row=r, column=col).number_format = fmt_contabil
                     st_cell = sheet.cell(row=r, column=13)
                     st_cell.font = Font(color="00B050") if st_cell.value == "OK" else Font(color="FF0000")
 
-                # AJUSTE AUTOMÁTICO DE LARGURA
-                for column in sheet.columns:
-                    max_length = 0
-                    column_letter = get_column_letter(column[0].column)
-                    for cell in column:
-                        try:
-                            if len(str(cell.value)) > max_length:
-                                max_length = len(str(cell.value))
-                        except: pass
-                    sheet.column_dimensions[column_letter].width = max_length + 2
-
-        st.success("✅ Relatório Contábil Profissional Gerado!")
-        st.download_button("📥 Baixar Excel Final", data=output.getvalue(), file_name="conciliacao_final_perfeita.xlsx")
+        st.success("✅ Relatório Premium Gerado com Sucesso!")
+        st.download_button("📥 Baixar Excel Final", data=output.getvalue(), file_name="conciliacao_automatica.xlsx")
             
     except Exception as e:
         st.error(f"Erro: {e}")
