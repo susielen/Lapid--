@@ -3,23 +3,22 @@ import pandas as pd
 import io, re
 from openpyxl.styles import Font, Alignment, PatternFill
 
-st.set_page_config(page_title="Conciliador Datas Corretas", layout="wide")
-st.title("📅 Conciliador (Agora com Datas Limpas)")
+st.set_page_config(page_title="Conciliador Estável", layout="wide")
+st.title("🛠️ Conciliador: Versão Corrigida")
 
 arquivo = st.file_uploader("Suba o arquivo Razão aqui", type=["csv", "xlsx"])
 
-def formatar_data(valor):
-    """Transforma qualquer formato de data em DD/MM/AAAA"""
-    try:
-        dt = pd.to_datetime(valor)
-        return dt.strftime('%d/%m/%Y')
-    except:
-        return str(valor).split(' ')[0] # Se falhar, tenta apenas cortar o horário
+def limpar_data_simples(valor):
+    """Apenas remove o horário se ele existir, sem bagunçar a coluna"""
+    if pd.isna(valor): return ""
+    txt = str(valor).strip()
+    # Se tiver espaço (ex: 2025-01-01 00:00:00), pega só a primeira parte
+    return txt.split(' ')[0]
 
 def extrair_nota(texto):
     texto = str(texto).upper()
     busca = re.search(r'(?:NFE|NF|NOTA|Nº)\s*(\d+)', texto)
-    return busca.group(1) if busca else "S/N"
+    return busca.group(1) if busca else ""
 
 def limpar_texto(v):
     if pd.isna(v) or str(v).lower() in ['nan', 'none', '']: return ""
@@ -27,64 +26,65 @@ def limpar_texto(v):
 
 if arquivo:
     try:
-        df = pd.read_excel(arquivo) if arquivo.name.endswith('.xlsx') else pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
+        # Carrega o arquivo respeitando a estrutura de vírgulas do seu CSV
+        if arquivo.name.endswith('.xlsx'):
+            df = pd.read_excel(arquivo)
+        else:
+            df = pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
         
-        linha_topo = " ".join([str(x) for x in df.iloc[0:2].values.flatten() if pd.notna(x)])
-        empresa = limpar_texto(linha_topo.upper().split("EMPRESA:")[-1].split("CNPJ:")[0]) if "EMPRESA:" in linha_topo.upper() else "EMPRESA"
+        # Pega o nome da empresa (Linhas iniciais)
+        topo = " ".join([str(x) for x in df.iloc[0:3].values.flatten() if pd.notna(x)])
+        nome_empresa = "EMPRESA"
+        if "EMPRESA:" in topo.upper():
+            nome_empresa = limpar_texto(topo.upper().split("EMPRESA:")[-1].split("CNPJ:")[0])
 
-        dados_finais = {}
+        dados_por_forn = {}
         forn_atual = None
 
-        for i, linha in df.iterrows():
+        for i in range(len(df)):
+            linha = df.iloc[i]
+            # Transforma a linha em texto para procurar a conta
             texto_linha = " ".join([str(v) for v in linha.values if pd.notna(v)]).upper()
             
             if "CONTA:" in texto_linha:
                 cod = re.search(r'CONTA:\s*(\d+)', texto_linha)
                 cod_val = cod.group(1) if cod else ""
-                nome_forn = limpar_texto(texto_linha.split("CONTA:")[-1].replace('NOME:', '').replace(cod_val, ''))
-                forn_atual = f"{cod_val} - {nome_forn}"
-                dados_finais[forn_atual] = []
+                nome_bruto = texto_linha.split("CONTA:")[-1].replace('NOME:', '').strip()
+                forn_atual = f"{cod_val} - {limpar_texto(nome_bruto.replace(cod_val, ''))}"
+                dados_por_forn[forn_atual] = []
             
-            elif forn_atual and ("/" in str(linha.iloc[0]) or "-" in str(linha.iloc[0])):
-                def num(v):
-                    try: return float(str(v).replace('.','').replace(',','.'))
-                    except: return 0.0
-                
-                v_deb = num(linha.iloc[8])
-                v_cre = num(linha.iloc[9])
-                historico = limpar_texto(linha.iloc[2])
-                
-                if v_deb > 0 or v_cre > 0:
-                    dados_finais[forn_atual].append({
-                        'Data': formatar_data(linha.iloc[0]), # <--- DATA CORRIGIDA AQUI
-                        'Nota Fiscal': extrair_nota(historico),
-                        'Histórico': historico,
-                        'Débito': v_deb,
-                        'Crédito': v_cre
-                    })
+            # Identifica linhas de movimento (onde a primeira coluna tem algo que parece data)
+            elif forn_atual and pd.notna(linha.iloc[0]) and any(c in str(linha.iloc[0]) for c in ['/', '-']):
+                try:
+                    # Ajuste de colunas baseado no seu CSV (D e C estão no final)
+                    v_deb = float(str(linha.iloc[-2]).replace('.','').replace(',','.')) if pd.notna(linha.iloc[-2]) else 0
+                    v_cre = float(str(linha.iloc[-1]).replace('.','').replace(',','.')) if pd.notna(linha.iloc[-1]) else 0
+                    
+                    if v_deb > 0 or v_cre > 0:
+                        hist = limpar_texto(linha.iloc[2]) # Coluna do Histórico
+                        dados_por_forn[forn_atual].append({
+                            'Data': limpar_data_simples(linha.iloc[0]),
+                            'Nota': extrair_nota(hist),
+                            'Histórico': hist,
+                            'Débito': v_deb,
+                            'Crédito': v_cre
+                        })
+                except: continue
 
+        # Salva o Excel
         saida = io.BytesIO()
         with pd.ExcelWriter(saida, engine='openpyxl') as writer:
-            for forn, itens in dados_finais.items():
-                if not itens: continue
-                df_f = pd.DataFrame(itens)
-                nome_aba = re.sub(r'[\\/*?:\[\]]', '', forn)[:31]
-                df_f.to_excel(writer, sheet_name=nome_aba, index=False, startrow=9, startcol=1)
+            for forn, lista in dados_por_forn.items():
+                if not lista: continue
+                pd.DataFrame(lista).to_excel(writer, sheet_name=re.sub(r'[\\/*?:\[\]]', '', forn)[:31], index=False, startrow=5)
                 
-                ws = writer.sheets[nome_aba]
-                for r in range(1, 100):
-                    for c in range(1, 15): ws.cell(row=r, column=c).fill = PatternFill("solid", fgColor="FFFFFF")
+                ws = writer.sheets[re.sub(r'[\\/*?:\[\]]', '', forn)[:31]]
+                ws['A1'] = f"EMPRESA: {nome_empresa}"
+                ws['A2'] = f"FORNECEDOR: {forn}"
+                ws.column_dimensions['C'].width = 50 # Histórico largo
+                
+        st.success("✅ Voltamos ao trilho! Estrutura recuperada e datas limpas.")
+        st.download_button("📥 Baixar Arquivo Corrigido", saida.getvalue(), "conciliacao_final.xlsx")
 
-                ws['B2'] = f"EMPRESA: {empresa}"
-                ws['B4'] = f"FORNECEDOR: {forn}"
-                
-                # Ajuste de colunas
-                ws.column_dimensions['B'].width = 15 # Data (espaço para DD/MM/AAAA)
-                ws.column_dimensions['C'].width = 15 # Nota
-                ws.column_dimensions['D'].width = 50 # Histórico
-                
-        st.success("✅ Datas formatadas e notas extraídas!")
-        st.download_button("📥 Baixar Planilha com Datas Certas", saida.getvalue(), "conciliacao_datas_corretas.xlsx")
-    
     except Exception as e:
-        st.error(f"Ocorreu um erro: {e}")
+        st.error(f"Erro técnico: {e}. Por favor, verifique se o arquivo está no formato original.")
