@@ -6,7 +6,7 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Conciliador Contábil Pro", layout="wide")
-st.title("🤖 Conciliador: Layout Alinhado e Simétrico")
+st.title("🤖 Conciliador: Versão Estável e Final")
 
 arquivo = st.file_uploader("Suba o Razão do Domínio aqui", type=["csv", "xlsx"])
 
@@ -24,7 +24,6 @@ def limpar_nome_simples(linha_txt):
     nome = linha_txt.split("CONTA:")[-1]
     nome = re.sub(r'(\d+\.)+\d+', '', nome) 
     nome = nome.replace(codigo, '').replace('NOME:', '').strip()
-    nome = re.sub(r'^[ \-_]+', '', nome)
     return f"{codigo} - {nome}" if codigo else nome
 
 if arquivo is not None:
@@ -82,6 +81,21 @@ if arquivo is not None:
                 df_c.to_excel(writer, sheet_name=nome_aba, index=False, startrow=6, startcol=8)
                 
                 sheet = writer.sheets[nome_aba]
-                sheet.sheet_view.showGridLines = False
                 
-                fmt_contabil = '_-R$ * #,##0.0
+                fmt_contabil = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
+                borda_fina = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                alinhar_centro = Alignment(horizontal='center')
+                alinhar_direita = Alignment(horizontal='right')
+
+                # 1. TÍTULO
+                sheet.merge_cells('A1:M1')
+                sheet['A1'] = forn
+                sheet['A1'].font = Font(bold=True, size=14)
+                sheet['A1'].alignment = alinhar_centro
+
+                # 2. SALDO (LINHA 3)
+                sheet.cell(row=3, column=4, value="SALDO").font = Font(bold=True)
+                sheet.cell(row=3, column=4).alignment = alinhar_direita
+                saldo_val = df_f['Crédito'].sum() - df_f['Débito'].sum()
+                c_saldo = sheet.cell(row=3, column=5, value=saldo_val)
+                c
