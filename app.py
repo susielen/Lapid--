@@ -5,7 +5,7 @@ from io import BytesIO
 
 st.set_page_config(page_title="Conciliador Mestre", layout="wide")
 
-st.title("🤖 Robô Conciliador (Título em 2 Linhas)")
+st.title("🤖 Robô Conciliador (Visual Espaçado)")
 
 arquivo = st.file_uploader("Suba o Razão (Excel ou CSV)", type=["xlsx", "csv"])
 
@@ -57,11 +57,9 @@ if arquivo:
                     
                     d_orig, c_orig = conv(linha[8]), conv(linha[9])
                     if d_orig == 0 and c_orig == 0: continue
-
                     hist = str(linha[2])
                     nfe = re.findall(r'NFe\s?(\d+)', hist)
                     num_nota = nfe[0] if nfe else str(linha[1])
-
                     dados_acumulados.append({
                         "Data": str(linha[0]), "NF": num_nota, "Histórico": hist, "Débito": -d_orig, "Crédito": c_orig
                     })
@@ -77,10 +75,8 @@ if arquivo:
                 workbook = writer.book
                 
                 # Formatos
-                fmt_titulo = workbook.add_format({
-                    'bold': True, 'align': 'center', 'valign': 'vcenter', 
-                    'bg_color': '#D3D3D3', 'border': 1, 'text_wrap': True, 'font_size': 12
-                })
+                fmt_titulo_empresa = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#D3D3D3', 'border': 1, 'text_wrap': True})
+                fmt_fornecedor_esq = workbook.add_format({'bold': True, 'align': 'left', 'font_size': 11})
                 fmt_moeda = workbook.add_format({'num_format': '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-', 'border': 1})
                 fmt_verde = workbook.add_format({'num_format': '_-R$ * #,##0.00_-', 'font_color': 'green', 'bold': True, 'border': 1})
                 fmt_vermelho = workbook.add_format({'num_format': '-R$ * #,##0.00_-', 'font_color': 'red', 'bold': True, 'border': 1})
@@ -89,41 +85,16 @@ if arquivo:
                 for f_id_nome, df_f in banco_fornecedores.items():
                     aba = "".join(c for c in f_id_nome[:31] if c.isalnum() or c in " -")
                     
-                    # Tabelas na Linha 7 (startrow=6)
-                    df_f.to_excel(writer, sheet_name=aba, startrow=6, startcol=1, index=False)
+                    # --- TABELAS MAIS PARA BAIXO: LINHA 10 (startrow=9) ---
+                    df_f.to_excel(writer, sheet_name=aba, startrow=9, startcol=1, index=False)
                     df_res = df_f.groupby("NF").agg({"Débito":"sum", "Crédito":"sum"}).reset_index()
                     df_res["Diferença"] = df_res["Débito"] + df_res["Crédito"]
                     
                     col_res_idx = len(df_f.columns) + 4
-                    df_res.to_excel(writer, sheet_name=aba, startrow=6, startcol=col_res_idx, index=False)
+                    df_res.to_excel(writer, sheet_name=aba, startrow=9, startcol=col_res_idx, index=False)
                     
                     ws = writer.sheets[aba]
                     ws.set_column('A:A', 2)
                     ws.set_row(0, 5) # Linha 1 fina
                     
-                    # --- NOVO: Mesclando Linha 2 e 3 (B2:M3) ---
-                    ws.merge_range('B2:M3', f"EMPRESA: {nome_empresa}\nFORNECEDOR: {f_id_nome}", fmt_titulo)
-                    
-                    # Linha 4 e 5 ficam em branco (ou finas se quiser)
-                    ws.set_row(3, 5)
-                    ws.set_row(4, 5)
-
-                    # Totais Linha 6
-                    ws.write('D6', 'Totais', fmt_negrito)
-                    ws.write('E6', df_f['Débito'].sum(), fmt_moeda)
-                    ws.write('F6', df_f['Crédito'].sum(), fmt_moeda)
-
-                    # Saldo no Final
-                    row_f = 7 + len(df_res)
-                    col_m_idx = col_res_idx + 3
-                    saldo = df_res['Diferença'].sum()
-                    ws.write(row_f, col_m_idx-1, "Saldo Final:", fmt_negrito)
-                    ws.write(row_f, col_m_idx, saldo, fmt_verde if saldo >= 0 else fmt_vermelho)
-
-                    ws.set_column(1, 20, 15, fmt_moeda)
-
-            st.success("✅ Título mesclado em duas linhas!")
-            st.download_button("📥 Baixar Excel", output.getvalue(), "conciliacao_titulo_duplo.xlsx")
-
-    except Exception as e:
-        st.error(f"Erro na mesclagem: {e}")
+                    # Título da Empresa (Linhas 2 e 3)
