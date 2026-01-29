@@ -8,7 +8,13 @@ st.title("🤖 Conciliador de Fornecedores")
 st.write("Suba o arquivo CSV do seu Razão e eu organizo tudo!")
 
 # Botão para colocar o arquivo
-arquivo = st.file_uploader("Arraste o arquivo Razão aqui", type="csv")
+arquivo = st.file_uploader("Arraste o arquivo Razão aqui", type=["csv", "xlsx"])
+
+if arquivo is not None:
+    if arquivo.name.endswith('.csv'):
+        df = pd.read_csv(arquivo, skiprows=6)
+    else:
+        df = pd.read_excel(arquivo, skiprows=6)
 
 if arquivo is not None:
     # O robô lê o arquivo
