@@ -4,71 +4,80 @@ import io
 
 st.set_page_config(page_title="Conciliador Domínio", page_icon="🤖")
 st.title("🤖 Conciliador de Fornecedores")
-st.write("Suba o arquivo do seu Razão (CSV ou Excel) e eu organizo tudo!")
+st.write("Suba o arquivo do seu Razão e eu organizo tudo!")
 
 arquivo = st.file_uploader("Arraste o arquivo Razão aqui", type=["csv", "xlsx"])
 
 if arquivo is not None:
     try:
-        # Lê o arquivo ignorando as linhas iniciais de cabeçalho do sistema
+        # Lê o arquivo. Se for CSV do Domínio, geralmente usa encoding latin-1
         if arquivo.name.endswith('.xlsx'):
-            df = pd.read_excel(arquivo, skiprows=5)
+            df = pd.read_excel(arquivo)
         else:
-            df = pd.read_csv(arquivo, skiprows=5, encoding='latin-1')
+            df = pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
 
-        # Limpa os nomes das colunas
-        df.columns = [str(c).strip() for c in df.columns]
-        
         dados = []
-        fornecedor_atual = None
+        fornecedor_atual = "Não Identificado"
 
+        # O robô vai percorrer linha por linha
         for i, linha in df.iterrows():
-            # Transforma a linha em texto para facilitar a busca
-            conteudo_linha = " ".join([str(val) for val in linha.values])
+            linha_texto = " ".join([str(val) for val in linha.values]).upper()
             
-            # Identifica a linha que contém o Fornecedor (geralmente começa com o código da conta)
-            if "Conta:" in conteudo_linha or ("1.01." in conteudo_linha and "Nome:" not in conteudo_linha):
-                # Tenta pegar o nome que vem após o código ou palavra Conta
-                fornecedor_atual = conteudo_linha.split("-")[-1].strip() if "-" in conteudo_linha else conteudo_linha
+            # 1. Identifica o Fornecedor (Linha que contém 'CONTA:' ou o código '1.01')
+            if "CONTA:" in linha_texto or "NOME:" in linha_texto:
+                fornecedor_atual = linha_texto.split("CONTA:")[-1].strip()
+                # Limpa excessos como códigos numéricos no final
+                if "NOME:" in fornecedor_atual:
+                    fornecedor_atual = fornecedor_atual.split("NOME:")[-1].strip()
                 continue
+
+            # 2. Só processa valores se a linha tiver uma DATA (evita lixo e totais)
+            # Procuramos por algo no formato 00/00/0000 nas primeiras colunas
+            tem_data = any("/20" in str(val) for val in linha.values[:3])
             
-            # Pega os valores das colunas de Débito e Crédito (ajustado para as colunas do seu arquivo)
-            # No seu arquivo, Débito costuma ser a 4ª ou 5ª coluna preenchida
-            try:
-                data = str(linha.get('Data', ''))
-                # Só processa se houver uma data válida (evita linhas de totais)
-                if "/" in data:
-                    debito = pd.to_numeric(linha.get('Débito', 0), errors='coerce')
-                    credito = pd.to_numeric(linha.get('Crédito', 0), errors='coerce')
+            if tem_data:
+                # Tenta localizar as colunas de Débito e Crédito por posição no seu arquivo
+                # Geralmente no seu CSV são as colunas 4 e 5 (ou E e F)
+                try:
+                    # Convertendo para número, tratando vírgulas se necessário
+                    def limpar_valor(val):
+                        if pd.isna(val): return 0
+                        v = str(val).replace('.', '').replace(',', '.')
+                        return pd.to_numeric(v, errors='coerce') or 0
+
+                    deb = limpar_valor(linha.iloc[4]) if len(linha) > 4 else 0
+                    cre = limpar_valor(linha.iloc[5]) if len(linha) > 5 else 0
                     
-                    if (pd.notna(debito) and debito > 0) or (pd.notna(credito) and credito > 0):
+                    if deb > 0 or cre > 0:
                         dados.append({
-                            'Fornecedor': fornecedor_atual if fornecedor_atual else "Outros",
-                            'Débito': debito if pd.notna(debito) else 0,
-                            'Crédito': credito if pd.notna(credito) else 0
+                            'Fornecedor': fornecedor_atual,
+                            'Débito': deb,
+                            'Crédito': cre
                         })
-            except:
-                continue
+                except:
+                    continue
 
         if dados:
-            df_final = pd.DataFrame(dados)
-            # Agrupa e soma
-            resumo = df_final.groupby('Fornecedor').agg({'Débito': 'sum', 'Crédito': 'sum'}).reset_index()
+            df_resumo = pd.DataFrame(dados)
+            resumo = df_resumo.groupby('Fornecedor').agg({'Débito': 'sum', 'Crédito': 'sum'}).reset_index()
             resumo['Saldo Final'] = resumo['Crédito'] - resumo['Débito']
-            
-            # Remove linhas que ficaram sem nome ou vazias
-            resumo = resumo[resumo['Fornecedor'].str.len() > 3]
 
-            st.success("✅ Agora sim! Veja os resultados:")
+            st.success("✅ Processado com sucesso!")
             st.dataframe(resumo.style.format({'Débito': 'R$ {:.2f}', 'Crédito': 'R$ {:.2f}', 'Saldo Final': 'R$ {:.2f}'}))
 
-            # Botão para baixar
-            saida = io.BytesIO()
-            with pd.ExcelWriter(saida, engine='openpyxl') as writer:
+            # Gerar Excel para download
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 resumo.to_excel(writer, index=False)
-            st.download_button("📥 Baixar Resumo Consolidado", data=saida.getvalue(), file_name="conciliacao_dominio.xlsx")
-        else:
-            st.warning("⚠️ O arquivo foi lido, mas não encontramos lançamentos de Débito/Crédito. Verifique se o arquivo está correto.")
             
+            st.download_button(
+                label="📥 Baixar Resultado em Excel",
+                data=output.getvalue(),
+                file_name="conciliacao_final.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.error("❌ Não encontrei lançamentos válidos. O formato do arquivo pode ter mudado.")
+
     except Exception as e:
-        st.error(f"Erro ao processar: {e}")
+        st.error(f"Erro técnico: {e}")
