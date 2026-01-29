@@ -4,93 +4,96 @@ import io, re
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
-st.set_page_config(page_title="Conciliador Turbo", layout="wide")
-st.title("🧼 Conciliador Profissional (Versão Limpa)")
+st.set_page_config(page_title="Conciliador Limpo", layout="wide")
+st.title("🧼 Conciliador: Versão Sem Erros")
 
-arquivo = st.file_uploader("Suba o arquivo Razão aqui", type=["csv", "xlsx"])
+arquivo = st.file_uploader("Suba o Razão (Excel ou CSV)", type=["csv", "xlsx"])
 
-def limpar(v):
-    """Apaga NANs e espaços extras"""
-    txt = str(v)
-    if txt.lower() in ['nan', 'none', '']: return ""
-    return " ".join(txt.split()).strip()
+def limpar_texto(txt):
+    """Remove NANs, espaços extras e limpa o nome do fornecedor"""
+    if pd.isna(txt): return ""
+    t = str(txt).replace('nan', '').replace('NAN', '').replace('NaN', '')
+    return " ".join(t.split()).strip()
 
 if arquivo:
     try:
-        df = pd.read_excel(arquivo) if arquivo.name.endswith('.xlsx') else pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
+        df_raw = pd.read_excel(arquivo) if arquivo.name.endswith('.xlsx') else pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
         
-        # Pega o nome da empresa na primeira linha
-        linha1 = " ".join([str(x) for x in df.iloc[0].values if pd.notna(x)])
-        nome_empresa = limpar(linha1.upper().split("EMPRESA:")[-1].split("CNPJ:")[0]) if "EMPRESA:" in linha1.upper() else "MINHA EMPRESA"
+        # 1. PEGAR O NOME DA EMPRESA (Linha 2)
+        linha_empresa = " ".join([str(v) for v in df_raw.iloc[0].values if pd.notna(v)])
+        empresa_nome = "EMPRESA"
+        if "EMPRESA:" in linha_empresa.upper():
+            empresa_nome = linha_empresa.upper().split("EMPRESA:")[-1].split("CNPJ:")[0].strip()
 
-        dados_finais = {}
-        forn_atual = None
+        resumo = {}
+        fornecedor_atual = None
 
-        for i, linha in df.iterrows():
+        for i, linha in df_raw.iterrows():
             texto_linha = " ".join([str(v) for v in linha.values if pd.notna(v)]).upper()
             
-            # Identifica início de novo fornecedor
+            # 2. IDENTIFICAR FORNECEDOR (Tira os NANs aqui)
             if "CONTA:" in texto_linha:
-                cod = re.search(r'CONTA:\s*(\d+)', texto_linha)
-                cod_val = cod.group(1) if cod else ""
+                codigo = re.search(r'CONTA:\s*(\d+)', texto_linha)
+                cod_val = codigo.group(1) if codigo else ""
+                
+                # Limpa o nome removendo o código e palavras inúteis
                 nome_bruto = texto_linha.split("CONTA:")[-1].replace('NOME:', '').strip()
-                # Limpa o nome tirando números de conta repetidos e NANs
-                nome_limpo = limpar(re.sub(r'(\d+\.)+\d+', '', nome_bruto).replace(cod_val, ''))
-                forn_atual = f"{cod_val} - {nome_limpo}"
-                dados_finais[forn_atual] = []
+                nome_limpo = limpar_texto(re.sub(r'(\d+\.)+\d+', '', nome_bruto).replace(cod_val, ''))
+                
+                fornecedor_atual = f"{cod_val} - {nome_limpo}" if cod_val else nome_limpo
+                resumo[fornecedor_atual] = []
             
-            # Identifica linhas de valores (pela data na primeira coluna)
-            elif forn_atual and ("/" in str(linha.iloc[0]) or "-" in str(linha.iloc[0])):
-                def num(v):
-                    try: return float(str(v).replace('.','').replace(',','.'))
+            # 3. PEGAR OS DADOS (Lançamentos)
+            elif fornecedor_atual and ("/" in str(linha.iloc[0])):
+                def para_float(val):
+                    try: return float(str(val).replace('.', '').replace(',', '.'))
                     except: return 0.0
                 
-                v_deb = num(linha.iloc[8])
-                v_cre = num(linha.iloc[9])
+                debito = para_float(linha.iloc[8])
+                credito = para_float(linha.iloc[9])
                 
-                if v_deb > 0 or v_cre > 0:
-                    dados_finais[forn_atual].append({
+                if debito > 0 or credito > 0:
+                    resumo[fornecedor_atual].append({
                         'Data': linha.iloc[0],
-                        'Histórico': limpar(linha.iloc[2]),
-                        'Débito': v_deb,
-                        'Crédito': v_cre
+                        'Histórico': limpar_texto(linha.iloc[2]),
+                        'Débito': debito,
+                        'Crédito': credito
                     })
 
-        saida_excel = io.BytesIO()
-        with pd.ExcelWriter(saida_excel, engine='openpyxl') as writer:
-            for forn, itens in dados_finais.items():
-                if not itens: continue
+        # GERAR O EXCEL
+        saida = io.BytesIO()
+        with pd.ExcelWriter(saida, engine='openpyxl') as writer:
+            for forn, dados in resumo.items():
+                if not dados: continue
                 
-                df_temp = pd.DataFrame(itens)
-                nome_aba = re.sub(r'[\\/*?:\[\]]', '', forn)[:31]
-                df_temp.to_excel(writer, sheet_name=nome_aba, index=False, startrow=9, startcol=1)
+                df_f = pd.DataFrame(dados)
+                aba = re.sub(r'[\\/*?:\[\]]', '', forn)[:31]
+                df_f.to_excel(writer, sheet_name=aba, index=False, startrow=9, startcol=1)
                 
-                ws = writer.sheets[nome_aba]
+                ws = writer.sheets[aba]
                 
-                # Limpa o fundo (tudo branco)
+                # FORMATAÇÃO VISUAL
+                branco = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
                 for r in range(1, 100):
-                    for c in range(1, 15): ws.cell(row=r, column=c).fill = PatternFill("solid", fgColor="FFFFFF")
-
-                # Cabeçalhos Alinhados à Esquerda
-                ws['B2'] = nome_empresa
+                    for c in range(1, 20): ws.cell(row=r, column=c).fill = branco
+                
+                # Cabeçalho Alinhado à Esquerda
+                ws.merge_cells('B2:J2'); ws['B2'] = empresa_nome
                 ws['B2'].font = Font(bold=True, size=12)
-                ws['B4'] = forn
+                
+                ws.merge_cells('B4:J4'); ws['B4'] = forn
                 ws['B4'].font = Font(bold=True, size=14)
                 
-                # Saldo e Totais em Negrito
+                # Negrito no SALDO e TOTAIS
                 ws.cell(row=6, column=4, value="SALDO").font = Font(bold=True)
                 ws.cell(row=8, column=4, value="TOTAIS").font = Font(bold=True)
                 
-                # Estilo de Moeda e Ajuste de Coluna
-                fmt_moeda = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
+                # Ajuste de Colunas
                 ws.column_dimensions['A'].width = 2
-                ws.column_dimensions['B'].width = 15
-                ws.column_dimensions['C'].width = 60 # Histórico largo
-                ws.column_dimensions['D'].width = 18
-                ws.column_dimensions['E'].width = 18
+                ws.column_dimensions['D'].width = 50 # Histórico maior
+                
+        st.success("✅ Agora sim! O arquivo foi limpo e organizado.")
+        st.download_button("📥 Baixar Planilha Corrigida", saida.getvalue(), "conciliacao_limpa.xlsx")
 
-        st.success("🎉 Concluído! O erro dos 'NAN' foi resolvido.")
-        st.download_button("📥 Baixar Planilha Limpa", saida_excel.getvalue(), "conciliacao_perfeita.xlsx")
-    
-    except Exception as erro:
-        st.error(f"Ops, algo deu errado: {erro}")
+    except Exception as e:
+        st.error(f"Erro ao processar: {e}")
