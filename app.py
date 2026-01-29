@@ -3,89 +3,83 @@ import pandas as pd
 import re
 from io import BytesIO
 
-# 1. Configuração inicial do Robô
-st.set_page_config(page_title="Conciliador Mestre", layout="wide")
+st.set_page_config(page_title="Conciliador Pro", layout="wide")
+st.title("🤖 Robô Conciliador")
 
-st.title("🤖 Robô Conciliador (Versão Ultra Blindada)")
-st.write("Suba o arquivo do Domínio e eu farei a mágica!")
+# Função para converter texto em número sem dar erro
+def to_num(val):
+    try:
+        if pd.isna(val): return 0.0
+        return float(str(val).replace('.', '').replace(',', '.'))
+    except: return 0.0
 
-arquivo = st.file_uploader("Suba o arquivo (XLSX ou CSV)", type=["xlsx", "csv"])
+arquivo = st.file_uploader("Suba o arquivo XLSX ou CSV", type=["xlsx", "csv"])
 
 if arquivo:
     try:
-        # 2. Lendo o papel (arquivo)
-        if arquivo.name.endswith('.csv'):
-            df_bruto = pd.read_csv(arquivo, header=None)
-        else:
-            df_bruto = pd.read_excel(arquivo, engine='openpyxl', header=None)
+        df_bruto = pd.read_excel(arquivo, header=None) if arquivo.name.endswith('xlsx') else pd.read_csv(arquivo, header=None)
         
-        # 3. Procurando o nome da Empresa
-        nome_empresa = "EMPRESA NÃO IDENTIFICADA"
-        for i in range(min(20, len(df_bruto))):
-            txt = str(df_bruto.iloc[i, 0])
-            if "Empresa:" in txt or "EMPRESA:" in txt.upper():
-                nome_empresa = str(df_bruto.iloc[i, 2]) if pd.notna(df_bruto.iloc[i, 2]) else nome_empresa
+        # Pega nome da empresa
+        nome_emp = "EMPRESA"
+        for i in range(min(15, len(df_bruto))):
+            if "Empresa:" in str(df_bruto.iloc[i, 0]):
+                nome_emp = str(df_bruto.iloc[i, 2])
                 break
 
-        banco_fornecedores = {}
-        fornecedor_atual = None
-        dados_acumulados = []
+        banco = {}
+        f_atual, dados = None, []
 
-        # 4. Organizando a bagunça (Processamento)
         for i in range(len(df_bruto)):
-            linha = df_bruto.iloc[i]
-            col0 = str(linha[0]).strip() if pd.notna(linha[0]) else ""
+            lin = df_bruto.iloc[i]
+            if "Conta:" in str(lin[0]):
+                if f_atual and dados: banco[f_atual] = pd.DataFrame(dados)
+                cod = str(lin[1]).strip()
+                nom = str(lin[5]) if pd.notna(lin[5]) else str(lin[2])
+                f_atual = f"{cod} - {nom}"
+                dados = []
+            elif len(lin) > 9:
+                d, c = to_num(lin[8]), to_num(lin[9])
+                if d != 0 or c != 0:
+                    nf = re.findall(r'NFe\s?(\d+)', str(lin[2]))
+                    dados.append({"Data": str(lin[0]), "NF": nf[0] if nf else str(lin[1]), "Hist": str(lin[2]), "Deb": -d, "Cred": c})
 
-            # Se achar a palavra "Conta:", é um novo fornecedor
-            if "Conta:" in col0:
-                if fornecedor_atual and dados_acumulados:
-                    banco_fornecedores[fornecedor_atual] = pd.DataFrame(dados_acumulados)
-                
-                codigo = str(linha.iloc[1]).strip() if pd.notna(linha.iloc[1]) else "000"
-                nome_forn = "Sem Nome"
-                for c in [5, 6, 2]:
-                    if len(linha) > c and pd.notna(linha.iloc[c]):
-                        nome_forn = str(linha.iloc[c]).strip()
-                        break
-                fornecedor_atual = f"{codigo} - {nome_forn}"
-                dados_acumulados = []
-                continue
-            
-            # Tentando ler os números de Débito e Crédito
-            try:
-                if len(linha) > 9:
-                    def para_numero(valor):
-                        if pd.isna(valor) or str(valor).strip() == "": return 0.0
-                        # Limpa pontos de milhar e troca vírgula por ponto
-                        v = str(valor).replace('.', '').replace(',', '.')
-                        try:
-                            return float(v)
-                        except:
-                            return 0.0
+        if f_atual and dados: banco[f_atual] = pd.DataFrame(dados)
 
-                    d = para_numero(linha[8])
-                    c = para_numero(linha[9])
+        if banco:
+            out = BytesIO()
+            with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
+                wb = writer.book
+                # Estilos
+                f_tit = wb.add_format({'bold':1,'align':'center','bg_color':'#D3D3D3','border':1})
+                f_std = wb.add_format({'border':1})
+                f_cur = wb.add_format({'num_format':'R$ #,##0.00','border':1})
+                f_vde = wb.add_format({'num_format':'R$ #,##0.00','font_color':'green','bold':1,'border':1})
+                f_vrm = wb.add_format({'num_format':'R$ #,##0.00','font_color':'red', 'bold':1,'border':1})
 
-                    if d == 0 and c == 0: continue
+                for f, df in banco.items():
+                    aba = re.sub(r'[\\/*?:\[\]]', '', f)[:31]
+                    ws = wb.add_worksheet(aba)
+                    ws.hide_gridlines(2)
+                    
+                    # Cabeçalho
+                    ws.merge_range('B2:M3', f"EMPRESA: {nome_emp} | {f}", f_tit)
+                    
+                    # Tabela Razão (Linha 10)
+                    df.to_excel(writer, sheet_name=aba, startrow=9, startcol=1, index=False)
+                    
+                    # Tabela Conciliação
+                    res = df.groupby("NF").agg({"Deb":"sum", "Cred":"sum"}).reset_index()
+                    res["Dif"] = res["Deb"] + res["Cred"]
+                    res.to_excel(writer, sheet_name=aba, startrow=9, startcol=7, index=False)
+                    
+                    # Saldo no final
+                    row = 10 + len(res)
+                    saldo = res["Dif"].sum()
+                    ws.write(row, 8, "Saldo Final:", f_std)
+                    ws.write(row, 9, saldo, f_vde if saldo >= 0 else f_vrm)
+                    ws.set_column('B:Z', 15, f_cur)
 
-                    # Pega a Data e a Nota Fiscal
-                    data_txt = str(linha[0])
-                    hist = str(linha[2])
-                    nfe = re.findall(r'NFe\s?(\d+)', hist)
-                    num_nota = nfe[0] if nfe else str(linha[1])
-
-                    dados_acumulados.append({
-                        "Data": data_txt, "NF": num_nota, "Histórico": hist, 
-                        "Débito": -d, "Crédito": c
-                    })
-            except:
-                continue
-
-        # Guarda o último da lista
-        if fornecedor_atual and dados_acumulados:
-            banco_fornecedores[fornecedor_atual] = pd.DataFrame(dados_acumulados)
-
-        # 5. Criando o desenho (Excel)
-        if banco_fornecedores:
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter
+            st.success("✅ Relatório pronto!")
+            st.download_button("📥 Baixar Excel", out.getvalue(), "conciliacao.xlsx")
+    except Exception as e:
+        st.error(f"Erro no processamento: {e}")
