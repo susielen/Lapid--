@@ -4,7 +4,7 @@ import io
 import re
 
 st.set_page_config(page_title="Conciliador Contábil Pro", layout="wide")
-st.title("🤖 Conciliador: Razão e Conciliação Integrados")
+st.title("🤖 Conciliador: Formato Contábil e Nomes Limpos")
 
 arquivo = st.file_uploader("Suba o Razão do Domínio aqui", type=["csv", "xlsx"])
 
@@ -12,20 +12,14 @@ def extrair_nfe(texto):
     match = re.search(r'(?:NFE|NF|NOTA|Nº)\s*(\d+)', str(texto).upper())
     return match.group(1) if match else "(vazio)"
 
-def extrair_codigo_e_nome(linha_txt):
-    # Pega o código (ex: 2113) e o nome
-    codigo = ""
+def limpar_nome_simples(linha_txt):
     match_cod = re.search(r'CONTA:\s*(\d+)', linha_txt)
-    if match_cod:
-        codigo = match_cod.group(1)
-    
+    codigo = match_cod.group(1) if match_cod else ""
     nome = linha_txt.split("CONTA:")[-1]
-    nome = re.sub(r'(\d+\.)+\d+', '', nome) # tira o 2.1.1...
-    nome = nome.replace(codigo, '').replace('NOME:', '').strip()
+    nome = re.sub(r'(\d+\.)+\d+', '', nome) 
+    nome = nome.replace(codigo, '').replace('NOME:', '').replace('CONTA:', '').strip()
     if nome.startswith('-'): nome = nome[1:].strip()
-    
-    # Retorna o formato para o rodapé: "2113 - NOME"
-    return f"{codigo} - {nome[:20]}" if codigo else nome[:25]
+    return f"{codigo} - {nome}" if codigo else nome
 
 if arquivo is not None:
     try:
@@ -39,9 +33,8 @@ if arquivo is not None:
 
         for i, linha in df_raw.iterrows():
             linha_txt = " ".join([str(v) for v in linha.values]).upper()
-            
             if "CONTA:" in linha_txt:
-                fornecedor_atual = extrair_codigo_e_nome(linha_txt)
+                fornecedor_atual = limpar_nome_simples(linha_txt)
                 if fornecedor_atual not in dict_fornecedores:
                     dict_fornecedores[fornecedor_atual] = []
                 continue
@@ -55,6 +48,7 @@ if arquivo is not None:
                     data_formatada = data_orig
 
                 def limpar_num(v):
+                    if pd.isna(v): return 0
                     v = str(v).replace('.', '').replace(',', '.')
                     return pd.to_numeric(v, errors='coerce') or 0
 
@@ -75,31 +69,7 @@ if arquivo is not None:
             lista_nomes = sorted([n for n in dict_fornecedores.keys() if dict_fornecedores[n]])
             fornecedor_sel = st.selectbox("Selecione o Fornecedor:", lista_nomes)
 
-            # --- PROCESSAMENTO ---
-            df_razao = pd.DataFrame(dict_fornecedores[fornecedor_sel])
-            total_deb = df_razao['Débito'].sum()
-            total_cre = df_razao['Crédito'].sum()
-            saldo_aberto = total_cre - total_deb # Crédito (+) e Débito (-)
-
-            df_concilia = df_razao.groupby('Nº NF').agg({'Débito': 'sum', 'Crédito': 'sum'}).reset_index()
-            df_concilia['DIFERENÇA'] = df_concilia['Crédito'] - df_concilia['Débito']
-            df_concilia['STATUS'] = df_concilia['DIFERENÇA'].apply(lambda x: "OK" if abs(x) < 0.05 else "DIVERGENTE")
-
-            # --- EXIBIÇÃO NO SITE ---
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                st.subheader(f"📋 Razão: {fornecedor_sel}")
-                st.dataframe(df_razao, use_container_width=True)
-                st.markdown(f"**TOTAIS DO RAZÃO:**")
-                st.write(f"Soma Débito: R$ {total_deb:,.2f} | Soma Crédito: R$ {total_cre:,.2f}")
-                st.warning(f"**SALDO EM ABERTO: R$ {saldo_aberto:,.2f}**")
-
-            with col2:
-                st.subheader("⚖️ Conciliação")
-                st.metric("Total em Aberto (NF)", f"R$ {saldo_aberto:,.2f}")
-                st.dataframe(df_concilia, use_container_width=True)
-
-            # --- GERAÇÃO DO EXCEL ---
+            # Preparação para Download
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 for forn in lista_nomes:
@@ -109,27 +79,44 @@ if arquivo is not None:
                         df_c['DIFERENÇA'] = df_c['Crédito'] - df_c['Débito']
                         df_c['STATUS'] = df_c['DIFERENÇA'].apply(lambda x: "OK" if abs(x) < 0.05 else "DIVERGENTE")
                         
-                        # Nome da aba (já com código e nome)
-                        nome_aba = re.sub(r'[\\/*?:\[\]]', '', forn)[:30]
-                        df_f.to_excel(writer, sheet_name=nome_aba, index=False, startrow=1)
+                        nome_aba = re.sub(r'[\\/*?:\[\]]', '', forn)[:31]
+                        df_f.to_excel(writer, sheet_name=nome_aba, index=False, startrow=2)
                         
                         sheet = writer.sheets[nome_aba]
-                        row_totais = len(df_f) + 3 # Pula uma linha
+                        # Formatação Contábil (Moeda)
+                        fmt_contabil = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
                         
-                        # Colocando totais embaixo das colunas Débito (5) e Crédito (6)
-                        sheet.cell(row=row_totais, column=4, value="TOTAL:")
-                        sheet.cell(row=row_totais, column=5, value=df_f['Débito'].sum())
-                        sheet.cell(row=row_totais, column=6, value=df_f['Crédito'].sum())
+                        # Aplica formato nas colunas de Débito e Crédito do Razão
+                        for row in range(4, len(df_f) + 4):
+                            sheet.cell(row=row, column=5).number_format = fmt_contabil
+                            sheet.cell(row=row, column=6).number_format = fmt_contabil
                         
-                        sheet.cell(row=row_totais + 1, column=4, value="SALDO:")
-                        sheet.cell(row=row_totais + 1, column=6, value=df_f['Crédito'].sum() - df_f['Débito'].sum())
+                        # Rodapé com Totais
+                        row_totais = len(df_f) + 4
+                        sheet.cell(row=row_totais, column=4, value="TOTAIS:")
+                        c_deb = sheet.cell(row=row_totais, column=5, value=df_f['Débito'].sum())
+                        c_cre = sheet.cell(row=row_totais, column=6, value=df_f['Crédito'].sum())
+                        c_deb.number_format = fmt_contabil
+                        c_cre.number_format = fmt_contabil
+                        
+                        sheet.cell(row=row_totais + 1, column=4, value="SALDO FINAL:")
+                        c_saldo = sheet.cell(row=row_totais + 1, column=6, value=df_f['Crédito'].sum() - df_f['Débito'].sum())
+                        c_saldo.number_format = fmt_contabil
 
-                        # Conciliação ao lado com Totalizador no topo
-                        sheet.cell(row=1, column=9, value="TOTAL EM ABERTO:")
-                        sheet.cell(row=1, column=10, value=df_f['Crédito'].sum() - df_f['Débito'].sum())
+                        # Conciliação com Totalizador na Linha 1
+                        sheet.cell(row=1, column=11, value="TOTALIZADOR:")
+                        c_total_geral = sheet.cell(row=1, column=12, value=df_f['Crédito'].sum() - df_f['Débito'].sum())
+                        c_total_geral.number_format = fmt_contabil
+                        
                         df_c.to_excel(writer, sheet_name=nome_aba, index=False, startrow=2, startcol=8)
-            
-            st.download_button("📥 Baixar Excel Final", data=output.getvalue(), file_name="conciliacao_dominio.xlsx")
+                        # Formata valores da tabela de conciliação
+                        for row in range(4, len(df_c) + 4):
+                            sheet.cell(row=row, column=10).number_format = fmt_contabil # Débito
+                            sheet.cell(row=row, column=11).number_format = fmt_contabil # Crédito
+                            sheet.cell(row=row, column=12).number_format = fmt_contabil # Diferença
+
+            st.success("✅ Arquivo processado com sucesso!")
+            st.download_button("📥 Baixar Planilha Contábil Final", data=output.getvalue(), file_name="conciliacao_contabil.xlsx")
             
     except Exception as e:
         st.error(f"Erro: {e}")
