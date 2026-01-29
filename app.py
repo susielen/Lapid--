@@ -98,4 +98,4 @@ if arquivo is not None:
                 sheet.cell(row=3, column=4).alignment = alinhar_direita
                 saldo_val = df_f['Crédito'].sum() - df_f['Débito'].sum()
                 c_saldo = sheet.cell(row=3, column=5, value=saldo_val)
-                c
+                
