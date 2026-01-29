@@ -3,49 +3,55 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.set_page_config(page_title="Conciliador Mágico", layout="wide")
+st.set_page_config(page_title="Conciliador Profissional", layout="wide")
 
-st.title("🤖 Super Robô Conciliador")
-st.write("Suba o Razão (Excel ou CSV) e baixe o resultado!")
+st.title("🤖 Robô Conciliador com Formatação Especial")
 
-arquivo = st.file_uploader("Escolha o arquivo do Domínio", type=["xlsx", "csv"])
+arquivo = st.file_uploader("Suba o arquivo do Domínio", type=["xlsx", "csv"])
 
 if arquivo:
-    # 1. Lendo o arquivo (Excel ou CSV)
+    # 1. Lendo o arquivo e pegando o nome da empresa
     if arquivo.name.endswith('.csv'):
-        df = pd.read_csv(arquivo, skip_blank_lines=True)
+        df_bruto = pd.read_csv(arquivo)
     else:
-        df = pd.read_excel(arquivo, engine='openpyxl')
+        df_bruto = pd.read_excel(arquivo, engine='openpyxl')
     
+    # Tenta pegar o nome da empresa (geralmente está na primeira linha)
+    nome_empresa = str(df_bruto.iloc[0, 2]) if not df_bruto.empty else "CONCILIAÇÃO"
+
     banco_fornecedores = {}
     fornecedor_atual = None
     dados_acumulados = []
 
-    # 2. O Robô Detetive separa e limpa os dados
-    for _, linha in df.iterrows():
-        primeira_celula = str(linha.iloc[0]).strip()
+    # 2. Processamento (Ignorando erros de data e NF)
+    for _, linha in df_bruto.iterrows():
+        celula_0 = str(linha.iloc[0]).strip()
         
-        if primeira_celula.startswith("Conta:"):
+        if celula_0.startswith("Conta:"):
             if fornecedor_atual and dados_acumulados:
                 banco_fornecedores[fornecedor_atual] = pd.DataFrame(dados_acumulados)
             fornecedor_atual = str(linha.iloc[5]) if len(linha) > 5 and pd.notna(linha.iloc[5]) else str(linha.iloc[2])
             dados_acumulados = []
             continue
         
-        if pd.notna(linha.iloc[0]) and any(char.isdigit() for char in str(linha.iloc[0])):
-            # Abreviando a data (deixa como 10/05/24)
-            data_obj = pd.to_datetime(linha.iloc[0])
-            data_abreviada = data_obj.strftime('%d/%m/%y')
+        # O robô agora aceita qualquer linha que pareça ter valores, mesmo com erro na data
+        if pd.notna(linha.iloc[8]) or pd.notna(linha.iloc[9]):
+            try:
+                # Tenta formatar a data, se der erro, deixa como está
+                data_val = pd.to_datetime(linha.iloc[0], errors='ignore')
+                data_exibicao = data_val.strftime('%d/%m/%y') if hasattr(data_val, 'strftime') else str(linha.iloc[0])
+            except:
+                data_exibicao = str(linha.iloc[0])
+
+            hist = str(linha.iloc[2])
+            nfe = re.findall(r'NFe\s?(\d+)', hist)
+            num_nota = nfe[0] if nfe else str(linha.iloc[1]) # Se não achar no texto, pega da coluna de NF
             
             deb = float(str(linha.iloc[8]).replace(',', '.')) if pd.notna(linha.iloc[8]) else 0
             cre = float(str(linha.iloc[9]).replace(',', '.')) if pd.notna(linha.iloc[9]) else 0
             
-            hist = str(linha.iloc[2])
-            nfe = re.findall(r'NFe\s?(\d+)', hist)
-            num_nota = nfe[0] if nfe else "S/N"
-            
             dados_acumulados.append({
-                "Data": data_abreviada,
+                "Data": data_exibicao,
                 "NF": num_nota,
                 "Histórico": hist,
                 "Débito": deb,
@@ -55,40 +61,38 @@ if arquivo:
     if fornecedor_atual and dados_acumulados:
         banco_fornecedores[fornecedor_atual] = pd.DataFrame(dados_acumulados)
 
-    # 3. Criando as Abas e Visualização
-    if banco_fornecedores:
-        nomes = list(banco_fornecedores.keys())
-        abas = st.tabs(nomes)
+    # 3. Geração do Excel com a formatação que você pediu
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        workbook = writer.book
         
-        # Preparando o arquivo para download
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            for i, nome in enumerate(nomes):
-                df_razao = banco_fornecedores[nome]
-                
-                # Conciliação
-                df_conc = df_razao.groupby("NF").agg({"Débito": "sum", "Crédito": "sum"}).reset_index()
-                df_conc["Diferença"] = df_conc["Débito"] - df_conc["Crédito"]
-                df_conc["Status"] = df_conc["Diferença"].apply(lambda x: "OK" if abs(x) < 0.01 else "Divergente")
+        # Formatos
+        formato_titulo = workbook.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'font_size': 14, 'bg_color': '#D3D3D3'})
+        
+        for nome_forn, df_f in banco_fornecedores.items():
+            # Criar aba
+            aba_nome = nome_forn[:31].replace('/', '-')
+            df_f.to_excel(writer, sheet_name=aba_nome, startrow=3, startcol=1, index=False)
+            worksheet = writer.sheets[aba_nome]
+            
+            # --- PEDIDO: Coluna A em branco e fina ---
+            worksheet.set_column('A:A', 2) 
+            
+            # --- PEDIDO: Linha 1 em branco e fina ---
+            worksheet.set_row(0, 5) 
+            
+            # --- PEDIDO: Nome da empresa na linha 2 mesclando até M ---
+            worksheet.merge_range('B2:M2', f"EMPRESA: {nome_empresa} | FORNECEDOR: {nome_forn}", formato_titulo)
+            worksheet.set_row(1, 30) # Linha 2 um pouco mais alta para o título
+            
+            # Ajustar colunas do Razão e Conciliação
+            worksheet.set_column('B:G', 15)
+            
+            # Criar a Conciliação ao lado (pulando 3 colunas)
+            df_conc = df_f.groupby("NF").agg({"Débito": "sum", "Crédito": "sum"}).reset_index()
+            start_col_conc = len(df_f.columns) + 4 # Coluna B(1) + colunas do df + 3 de espaço
+            df_conc.to_excel(writer, sheet_name=aba_nome, startrow=3, startcol=start_col_conc, index=False)
 
-                # Mostrando na aba do Streamlit
-                with abas[i]:
-                    col_esq, col_pulo, col_dir = st.columns([1.5, 0.2, 1])
-                    with col_esq:
-                        st.write("**📄 Razão**")
-                        st.dataframe(df_razao, use_container_width=True, hide_index=True)
-                    with col_dir:
-                        st.write("**⚖️ Conciliação**")
-                        st.dataframe(df_conc, use_container_width=True, hide_index=True)
-                
-                # Salvando no arquivo Excel (Lado a Lado com pulo de 3 colunas)
-                df_razao.to_excel(writer, sheet_name=nome[:31], index=False, startcol=0)
-                df_conc.to_excel(writer, sheet_name=nome[:31], index=False, startcol=len(df_razao.columns) + 3)
-
-        st.divider()
-        st.download_button(
-            label="📥 Baixar Conciliação em Excel",
-            data=output.getvalue(),
-            file_name="conciliacao_final.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    # Botão de download
+    st.success("Tudo pronto! Seu arquivo está formatado.")
+    st.download_button("📥 Baixar Excel Formatado", output.getvalue(), "conciliacao_nota_dez.xlsx")
