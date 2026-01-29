@@ -1,158 +1,106 @@
 import streamlit as st
 import pandas as pd
-import io
-import re
+import io, re
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
-st.set_page_config(page_title="Conciliador Contábil Pro", layout="wide")
-st.title("🤖 Conciliador: Tudo Centralizado e Organizado")
+st.set_page_config(page_title="Conciliador Contábil", layout="wide")
+st.title("🤖 Conciliador: Versão Oficial")
 
-arquivo = st.file_uploader("Suba o Razão do Domínio aqui", type=["csv", "xlsx"])
+arquivo = st.file_uploader("Suba o Razão", type=["csv", "xlsx"])
 
-def extrair_nfe(texto):
-    match = re.search(r'(?:NFE|NF|NOTA|Nº)\s*(\d+)', str(texto).upper())
-    return match.group(1) if match else "(vazio)"
+def limpar(s):
+    return str(s).replace('nan', '').replace('NAN', '').replace('NaN', '').strip()
 
-def limpar_nome_simples(linha_txt):
-    linha_txt = str(linha_txt).replace('nan', '').replace('NAN', '').replace('NaN', '')
-    match_cod = re.search(r'CONTA:\s*(\d+)', linha_txt)
-    codigo = match_cod.group(1) if match_cod else ""
-    nome = linha_txt.split("CONTA:")[-1]
-    nome = re.sub(r'(\d+\.)+\d+', '', nome) 
-    nome = nome.replace(codigo, '').replace('NOME:', '').strip()
-    nome = re.sub(r'^[ \-_]+', '', nome)
-    return f"{codigo} - {nome}" if codigo else nome
+def extrair_nf(t):
+    m = re.search(r'(?:NFE|NF|NOTA|Nº)\s*(\d+)', str(t).upper())
+    return int(m.group(1)) if m else ""
 
 if arquivo is not None:
     try:
-        if arquivo.name.endswith('.xlsx'):
-            df_raw = pd.read_excel(arquivo)
-        else:
-            df_raw = pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
+        df_raw = pd.read_excel(arquivo) if arquivo.name.endswith('.xlsx') else pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
+        
+        # Identifica Empresa
+        L1 = " ".join([str(v) for v in df_raw.iloc[0].values])
+        empresa = limpar(L1.upper().split("EMPRESA:")[-1].split("CNPJ:")[0]) or "EMPRESA"
 
-        dict_fornecedores = {}
-        fornecedor_atual = None
-
+        resumo, forn = {}, None
         for i, linha in df_raw.iterrows():
-            valores_limpos = [str(v).replace('nan', '').strip() for v in linha.values]
-            linha_txt = " ".join(valores_limpos).upper()
-            
-            if "CONTA:" in linha_txt:
-                fornecedor_atual = limpar_nome_simples(linha_txt)
-                dict_fornecedores[fornecedor_atual] = []
-                continue
-            
-            data_orig = str(linha.iloc[0])
-            if "/" in data_orig or (len(data_orig) >= 8 and "-" in data_orig):
-                try:
-                    data_dt = pd.to_datetime(data_orig)
-                    data_formatada = data_dt.strftime('%d/%m/%y')
-                except:
-                    data_formatada = data_orig
-
-                def limpar_num(v):
-                    if pd.isna(v) or str(v).lower() == 'nan' or str(v).strip() == '': return 0.0
+            txt = " ".join([str(v) for v in linha.values]).upper()
+            if "CONTA:" in txt:
+                m_c = re.search(r'CONTA:\s*(\d+)', txt)
+                c_id = m_c.group(1) if m_c else ""
+                n_f = txt.split("CONTA:")[-1].replace('NOME:', '').strip()
+                n_f = re.sub(r'(\d+\.)+\d+', '', n_f).replace(c_id, '').strip()
+                n_f = re.sub(r'^[ \-_]+', '', n_f)
+                forn = f"{c_id} - {n_f}" if c_id else n_f
+                resumo[forn] = []
+            elif forn and ("/" in str(linha.iloc[0]) or "-" in str(linha.iloc[0])):
+                def p_f(v):
                     v = str(v).replace('.', '').replace(',', '.')
                     try: return float(v)
                     except: return 0.0
-                
-                deb = limpar_num(linha.iloc[8])
-                cre = limpar_num(linha.iloc[9])
+                d, c = p_f(linha.iloc[8]), p_f(linha.iloc[9])
+                if d > 0 or c > 0:
+                    h = limpar(linha.iloc[2])
+                    try: dt = pd.to_datetime(linha.iloc[0], dayfirst=True)
+                    except: dt = str(linha.iloc[0])
+                    resumo[forn].append({'Data':dt, 'Nº NF':extrair_nf(h), 'Histórico':h, 'Débito':d, 'Crédito':c})
 
-                if (deb > 0 or cre > 0) and fornecedor_atual:
-                    hist = str(linha.iloc[2]).replace('nan', '')
-                    dict_fornecedores[fornecedor_atual].append({
-                        'Data': data_formatada, 'Nº NF': extrair_nfe(hist),
-                        'Histórico': hist, 'Débito': deb, 'Crédito': cre
-                    })
-
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            for forn, lancamentos in dict_fornecedores.items():
-                if not lancamentos: continue
-                
-                df_f = pd.DataFrame(lancamentos)
-                df_c = df_f.groupby('Nº NF').agg({'Débito': 'sum', 'Crédito': 'sum'}).reset_index()
-                df_c['DIFERENÇA'] = df_c['Crédito'] - df_c['Débito']
+        out = io.BytesIO()
+        with pd.ExcelWriter(out, engine='openpyxl') as writer:
+            for nm, dd in resumo.items():
+                if not dd: continue
+                df_f = pd.DataFrame(dd)
+                df_c = df_f.groupby('Nº NF').agg({'Débito':'sum', 'Crédito':'sum'}).reset_index()
+                df_c['DIFERENÇA'] = df_c['Crédito'] - df_f['Débito'].sum() 
                 df_c['STATUS'] = df_c['DIFERENÇA'].apply(lambda x: "OK" if abs(x) < 0.05 else "DIVERGENTE")
                 
-                nome_aba = re.sub(r'[\\/*?:\[\]]', '', forn)[:31]
-                df_f.to_excel(writer, sheet_name=nome_aba, index=False, startrow=5)
-                df_c.to_excel(writer, sheet_name=nome_aba, index=False, startrow=5, startcol=8)
+                aba = re.sub(r'[\\/*?:\[\]]', '', nm)[:31]
+                df_f.to_excel(writer, sheet_name=aba, index=False, startrow=9, startcol=1)
+                df_c.to_excel(writer, sheet_name=aba, index=False, startrow=9, startcol=9)
+                ws = writer.sheets[aba]
                 
-                sheet = writer.sheets[nome_aba]
-                sheet.sheet_view.showGridLines = False
+                f = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                for r in range(1, 150):
+                    for col in range(1, 20): ws.cell(row=r, column=col).fill = f
                 
-                fmt_contabil = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
-                preenchimento_cinza = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-                borda_fina = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-                alinhar_centro = Alignment(horizontal='center')
+                b = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                ac, ar, al = Alignment(horizontal='center'), Alignment(horizontal='right'), Alignment(horizontal='left')
+                fm = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
 
-                # --- 1. TOPO ---
-                sheet.merge_cells('A1:M1')
-                sheet['A1'] = forn
-                sheet['A1'].font = Font(bold=True, size=14)
-                sheet['A1'].alignment = alinhar_centro
+                ws.column_dimensions['A'].width = 2
+                ws.merge_cells('B2:N2'); ws['B2'] = empresa
+                ws['B2'].font, ws['B2'].alignment = Font(bold=True, size=12), al
+                ws.merge_cells('B4:N4'); ws['B4'] = nm
+                ws['B4'].font, ws['B4'].alignment = Font(bold=True, size=13), al
 
-                sheet.cell(row=3, column=4, value="TOTAIS").font = Font(bold=True)
-                sheet.cell(row=3, column=6, value="SALDO").font = Font(bold=True)
-                sheet.cell(row=4, column=12, value="Saldo").font = Font(bold=True)
+                ws.cell(row=6, column=5, value="SALDO").font = Font(bold=True)
+                ws.cell(row=6, column=5).alignment = ar
+                v_s = df_f['Crédito'].sum() - df_f['Débito'].sum()
+                c_s = ws.cell(row=6, column=6, value=v_s)
+                c_s.font, c_s.border, c_s.number_format = Font(bold=True, color="FF0000" if v_s < 0 else "00B050"), b, fm
 
-                # Bordas e Cores nos Totais do Topo
-                for c_idx, val in [(4, df_f['Débito'].sum()), (5, df_f['Crédito'].sum())]:
-                    cel = sheet.cell(row=4, column=c_idx, value=val)
-                    cel.number_format = fmt_contabil
-                    cel.font = Font(bold=True, color="FF0000" if c_idx==4 else "00B050")
-                    cel.border = borda_fina
-
-                saldo_f = df_f['Crédito'].sum() - df_f['Débito'].sum()
-                for col in [6, 13]:
-                    cel = sheet.cell(row=4, column=col, value=saldo_f)
-                    cel.number_format = fmt_contabil
-                    cel.font = Font(bold=True, color="FF0000" if saldo_f < 0 else "00B050")
-                    cel.border = borda_fina
-
-                # --- 2. CABEÇALHOS ---
-                for col_idx in range(1, 14):
-                    celula = sheet.cell(row=6, column=col_idx)
-                    if celula.value:
-                        celula.fill = preenchimento_cinza
-                        celula.font = Font(bold=True)
-                        celula.alignment = alinhar_centro
-                        if col_idx != 6: celula.border = borda_fina
-
-                # --- 3. CORPO COM CENTRALIZAÇÃO ---
-                # Razão
-                for r in range(7, len(df_f) + 7):
-                    for c_idx in range(1, 7):
-                        cel = sheet.cell(row=r, column=c_idx)
-                        if c_idx < 6: cel.border = borda_fina
-                        if c_idx in [1, 2]: cel.alignment = alinhar_centro # DATA E NOTA
-                        if c_idx in [5, 6]: cel.number_format = fmt_contabil
+                # AJUSTE AQUI: TOTAIS AGORA À ESQUERDA (al)
+                ws.cell(row=8, column=4, value="TOTAIS").font = Font(bold=True)
+                ws.cell(row=8, column=4).alignment = al 
                 
-                # Conciliação
-                for r in range(7, len(df_c) + 7):
-                    for c_idx in range(9, 14):
-                        cel = sheet.cell(row=r, column=c_idx)
-                        cel.border = borda_fina
-                        if c_idx == 9: cel.alignment = alinhar_centro # NOTA NA CONCILIAÇÃO
-                        if c_idx in [10, 11, 12]: cel.number_format = fmt_contabil
-                    
-                    st_cell = sheet.cell(row=r, column=13)
-                    st_cell.alignment = alinhar_centro
-                    st_cell.font = Font(color="00B050") if st_cell.value == "OK" else Font(color="FF0000")
+                for ci, v, cr in [(5, df_f['Débito'].sum(), "FF0000"), (6, df_f['Crédito'].sum(), "00B050")]:
+                    cel = ws.cell(row=8, column=ci, value=v)
+                    cel.font, cel.border, cel.number_format = Font(bold=True, color=cr), b, fm
 
-                # --- 4. LARGURA ---
-                for column in sheet.columns:
-                    col_letter = get_column_letter(column[0].column)
-                    if col_letter == 'A': sheet.column_dimensions[col_letter].width = 12
-                    elif col_letter in ['G', 'H']: sheet.column_dimensions[col_letter].width = 4
-                    elif col_letter == 'C': sheet.column_dimensions[col_letter].width = 45
-                    else: sheet.column_dimensions[col_letter].width = 18
+                for c in range(2, 15):
+                    ws.cell(row=10, column=c).font = Font(bold=True)
+                    ws.cell(row=10, column=c).alignment = ac
+                    L = get_column_letter(c)
+                    ws.column_dimensions[L].width = 45 if L=='D' else 18
+                
+                for r in range(11, 11 + len(df_f)):
+                    ws.cell(row=r, column=2).number_format = 'dd/mm/yyyy'
+                    ws.cell(row=r, column=6).number_format = fm
+                    ws.cell(row=r, column=7).number_format = fm
 
-        st.success("✅ Relatório Centralizado com Sucesso!")
-        st.download_button("📥 Baixar Excel Final", data=output.getvalue(), file_name="conciliacao_alinhada.xlsx")
-            
+        st.success("✅ Tudo pronto!")
+        st.download_button("📥 Baixar Planilha Oficial", out.getvalue(), "conciliacao.xlsx")
     except Exception as e:
-        st.error(f"Erro inesperado: {e}")
+        st.error(f"Erro: {e}")
