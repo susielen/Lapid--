@@ -6,7 +6,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Conciliador Contábil Pro", layout="wide")
-st.title("🤖 Conciliador: Versão Clean (Sem Grade)")
+st.title("🤖 Conciliador: Versão Estável e Corrigida")
 
 arquivo = st.file_uploader("Suba o Razão do Domínio aqui", type=["csv", "xlsx"])
 
@@ -52,7 +52,7 @@ if arquivo is not None:
                     data_formatada = data_orig
 
                 def limpar_num(v):
-                    if pd.isna(v) or str(v).lower() == 'nan': return 0
+                    if pd.isna(v) or str(v).lower() == 'nan' or str(v).strip() == '': return 0.0
                     v = str(v).replace('.', '').replace(',', '.')
                     try:
                         return float(v)
@@ -84,10 +84,6 @@ if arquivo is not None:
                 df_c.to_excel(writer, sheet_name=nome_aba, index=False, startrow=5, startcol=8)
                 
                 sheet = writer.sheets[nome_aba]
-                
-                # --- REMOVER LINHAS DE GRADE ---
-                sheet.view.showGridLines = False
-                
                 fmt_contabil = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
                 preenchimento_cinza = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
                 
@@ -100,53 +96,8 @@ if arquivo is not None:
                 sheet.cell(row=3, column=4, value="TOTAIS").font = Font(bold=True)
                 sheet.cell(row=3, column=6, value="SALDO").font = Font(bold=True)
 
-                v_deb_topo = sheet.cell(row=4, column=4, value=df_f['Débito'].sum())
-                v_deb_topo.number_format = fmt_contabil
-                v_deb_topo.font = Font(bold=True, color="FF0000")
+                v_deb_t = sheet.cell(row=4, column=4, value=df_f['Débito'].sum())
+                v_deb_t.number_format = fmt_contabil
+                v_deb_t.font = Font(bold=True, color="FF0000")
 
-                v_cre_topo = sheet.cell(row=4, column=5, value=df_f['Crédito'].sum())
-                v_cre_topo.number_format = fmt_contabil
-                v_cre_topo.font = Font(bold=True, color="00B050")
-                
-                saldo = df_f['Crédito'].sum() - df_f['Débito'].sum()
-                v_saldo = sheet.cell(row=4, column=6, value=saldo)
-                v_saldo.number_format = fmt_contabil
-                v_saldo.font = Font(bold=True, color="FF0000" if saldo < 0 else "00B050")
-
-                # Saldo Conciliação
-                sheet.cell(row=4, column=12, value="Saldo").font = Font(bold=True)
-                v_conc_val = sheet.cell(row=4, column=13, value=saldo)
-                v_conc_val.number_format = fmt_contabil
-                v_conc_val.font = Font(bold=True, color="FF0000" if saldo < 0 else "00B050")
-
-                # --- CABEÇALHOS DAS TABELAS EM CINZA ---
-                for col_idx in range(1, 14):
-                    celula = sheet.cell(row=6, column=col_idx)
-                    if celula.value:
-                        celula.fill = preenchimento_cinza
-                        celula.font = Font(bold=True)
-
-                # --- FORMATO CONTÁBIL E CORES ---
-                for r in range(7, len(df_f) + 7):
-                    sheet.cell(row=r, column=5).number_format = fmt_contabil
-                    sheet.cell(row=r, column=6).number_format = fmt_contabil
-                
-                for r in range(7, len(df_c) + 7):
-                    for c_idx in [10, 11, 12]:
-                        sheet.cell(row=r, column=c_idx).number_format = fmt_contabil
-                    st_cell = sheet.cell(row=r, column=13)
-                    st_cell.font = Font(color="00B050") if st_cell.value == "OK" else Font(color="FF0000")
-
-                # --- AJUSTE DE LARGURA ---
-                for column in sheet.columns:
-                    col_letter = get_column_letter(column[0].column)
-                    if col_letter == 'A': sheet.column_dimensions[col_letter].width = 12
-                    elif col_letter in ['G', 'H']: sheet.column_dimensions[col_letter].width = 4
-                    elif col_letter == 'C': sheet.column_dimensions[col_letter].width = 45
-                    else: sheet.column_dimensions[col_letter].width = 18
-
-        st.success("✅ Relatório de Luxo Gerado!")
-        st.download_button("📥 Baixar Planilha Sem Grade", data=output.getvalue(), file_name="conciliacao_clean.xlsx")
-            
-    except Exception as e:
-        st.error(f"Erro: {e}")
+                v_cre_t = sheet.cell(row=4, column=5, value=df
