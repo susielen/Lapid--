@@ -1,82 +1,95 @@
 import streamlit as st
 import pandas as pd
 import io
+import re
 
-st.set_page_config(page_title="Conciliador Domínio", page_icon="🤖")
-st.title("🤖 Conciliador de Fornecedores")
+st.set_page_config(page_title="Conciliador Pro", layout="wide")
+st.title("🤖 Conciliador de Fornecedores (Modelo Razão/Conciliação)")
 
-arquivo = st.file_uploader("Arraste o arquivo Razão aqui", type=["csv", "xlsx"])
+arquivo = st.file_uploader("Suba o arquivo Razão do Domínio aqui", type=["csv", "xlsx"])
+
+def extrair_nota(texto):
+    # Procura padrões de nota fiscal no histórico (ex: NFe 1234, NF 567)
+    match = re.search(r'(?:NF|NFE|NF-E|NOTA|Nº)\s*(\d+)', str(texto).upper())
+    return match.group(1) if match else "(vazio)"
 
 if arquivo is not None:
     try:
+        # 1. LEITURA DOS DADOS
         if arquivo.name.endswith('.xlsx'):
-            df = pd.read_excel(arquivo)
+            df_raw = pd.read_excel(arquivo)
         else:
-            df = pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
+            df_raw = pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
 
-        dados = []
+        lista_razao = []
         fornecedor_atual = "Não Identificado"
 
-        for i, linha in df.iterrows():
-            linha_lista = [str(val).strip().upper() for val in linha.values]
-            linha_texto = " ".join(linha_lista)
+        # 2. PROCESSAMENTO (ESTILO RAZÃO FORNECEDOR)
+        for _, linha in df_raw.iterrows():
+            texto_linha = " ".join([str(v) for v in linha.values]).upper()
             
-            # 1. Identifica o Fornecedor
-            if "CONTA:" in linha_texto:
-                fornecedor_atual = linha_texto.split("CONTA:")[-1].strip()
+            # Identifica novo fornecedor
+            if "CONTA:" in texto_linha:
+                fornecedor_atual = texto_linha.split("CONTA:")[-1].strip()
                 continue
-
-            # 2. Procura por valores em QUALQUER coluna da linha
-            # Mas só faz isso se a linha tiver uma data (00/00/0000)
-            if any("/" in s and len(s) >= 8 for s in linha_lista[:4]):
+            
+            # Verifica se é linha de lançamento (tem data)
+            tem_data = any("/20" in str(v) for v in linha.values[:3])
+            if tem_data:
+                hist = str(linha.iloc[2]) # Coluna Histórico
+                nf = extrair_nota(hist)
                 
-                valores_da_linha = []
-                for val in linha.values:
-                    try:
-                        # Limpa o valor (tira pontos de milhar e muda vírgula para ponto)
-                        v_limpo = str(val).replace('.', '').replace(',', '.')
-                        num = pd.to_numeric(v_limpo, errors='coerce')
-                        if pd.notna(num) and num > 0:
-                            valores_da_linha.append(num)
-                    except:
-                        continue
-                
-                # Se achamos dois números, o primeiro é Débito e o segundo é Crédito
-                # Se achamos só um, precisamos decidir qual é (baseado na posição)
-                if len(valores_da_linha) >= 1:
-                    # No Razão, Débito vem antes de Crédito
-                    # Vamos pegar os maiores valores encontrados na linha
-                    deb = valores_da_linha[0] if len(valores_da_linha) >= 1 else 0
-                    cre = valores_da_linha[1] if len(valores_da_linha) >= 2 else 0
-                    
-                    # Se só achou um valor, vamos checar em qual lado da linha ele estava
-                    if len(valores_da_linha) == 1:
-                        # Se o valor estava mais para o fim da linha, é crédito
-                        posicao = list(linha.values).index(valores_da_linha[0])
-                        if posicao > len(linha)/2:
-                            cre = deb
-                            deb = 0
+                # Limpeza de valores
+                def limpar(v):
+                    v = str(v).replace('.', '').replace(',', '.')
+                    return pd.to_numeric(v, errors='coerce') or 0
 
-                    dados.append({
+                deb = limpar(linha.iloc[8]) # Débito costuma ser coluna 8 no Razão Domínio
+                cre = limpar(linha.iloc[9]) # Crédito costuma ser coluna 9
+
+                if deb > 0 or cre > 0:
+                    lista_razao.append({
                         'Fornecedor': fornecedor_atual,
+                        'Data': linha.iloc[0],
+                        'Histórico': hist,
+                        'Nº NF': nf,
                         'Débito': deb,
                         'Crédito': cre
                     })
 
-        if dados:
-            df_resumo = pd.DataFrame(dados)
-            resumo = df_resumo.groupby('Fornecedor').agg({'Débito': 'sum', 'Crédito': 'sum'}).reset_index()
-            resumo['Saldo Final'] = resumo['Crédito'] - resumo['Débito']
+        if lista_razao:
+            df_razao = pd.DataFrame(lista_razao)
 
-            st.success("✅ Consegui! Encontrei os valores.")
-            st.dataframe(resumo.style.format({'Débito': 'R$ {:.2f}', 'Crédito': 'R$ {:.2f}', 'Saldo Final': 'R$ {:.2f}'}))
+            # 3. CRIAÇÃO DA ABA CONCILIAÇÃO
+            # Agrupamos por Fornecedor e Nota Fiscal
+            df_conciliacao = df_razao.groupby(['Fornecedor', 'Nº NF']).agg({
+                'Débito': 'sum',
+                'Crédito': 'sum'
+            }).reset_index()
 
+            df_conciliacao['DIFERENÇA'] = df_conciliacao['Crédito'] - df_conciliacao['Débito']
+            df_conciliacao['STATUS'] = df_conciliacao['DIFERENÇA'].apply(lambda x: "OK" if abs(x) < 0.01 else "DIVERGENTE")
+
+            # EXIBIÇÃO NO SITE
+            tab1, tab2 = st.tabs(["📋 Razão Detalhado", "⚖️ Conciliação (Status)"])
+            
+            with tab1:
+                st.subheader("Visualização estilo 'Razão Fornecedor'")
+                st.dataframe(df_razao)
+
+            with tab2:
+                st.subheader("Visualização estilo 'Conciliação'")
+                st.dataframe(df_conciliacao)
+
+            # DOWNLOAD
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                resumo.to_excel(writer, index=False)
-            st.download_button("📥 Baixar Resultado", data=output.getvalue(), file_name="resumo.xlsx")
+                df_razao.to_excel(writer, sheet_name='RAZÃO FORNECEDOR', index=False)
+                df_conciliacao.to_excel(writer, sheet_name='CONCILIAÇÃO', index=False)
+            
+            st.download_button("📥 Baixar Planilha Pronta", data=output.getvalue(), file_name="conciliacao_feita.xlsx")
         else:
-            st.error("❌ Ainda não encontrei valores. O arquivo parece não ter lançamentos de débito/crédito reconhecíveis.")
+            st.warning("Não foi possível identificar lançamentos no arquivo.")
 
     except Exception as e:
         st.error(f"Erro: {e}")
