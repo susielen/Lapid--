@@ -4,7 +4,7 @@ import re
 from io import BytesIO
 
 st.set_page_config(page_title="Conciliador Clean", layout="wide")
-st.title("🤖 Robô Conciliador (Visual 100% Clean)")
+st.title("🤖 Robô Conciliador (Datas Curtas e Estilo Tabela)")
 
 def to_num(val):
     try:
@@ -38,8 +38,21 @@ if arquivo:
             elif len(lin) > 9:
                 d, c = to_num(lin[8]), to_num(lin[9])
                 if d != 0 or c != 0:
+                    # Encurta a Data (pega apenas os primeiros 10 caracteres e tenta formatar)
+                    data_orig = str(lin[0])
+                    try:
+                        data_curta = pd.to_datetime(data_orig).strftime('%d/%m/%y')
+                    except:
+                        data_curta = data_orig[:8] # Se falhar, apenas corta o texto
+
                     nf = re.findall(r'NFe\s?(\d+)', str(lin[2]))
-                    dados.append({"Data": str(lin[0]), "NF": nf[0] if nf else str(lin[1]), "Hist": str(lin[2]), "Deb": -d, "Cred": c})
+                    dados.append({
+                        "Data": data_curta, 
+                        "NF": nf[0] if nf else str(lin[1]), 
+                        "Hist": str(lin[2]), 
+                        "Deb": -d, 
+                        "Cred": c
+                    })
 
         if f_atual and dados: banco[f_atual] = pd.DataFrame(dados)
 
@@ -48,28 +61,30 @@ if arquivo:
             with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
                 wb = writer.book
                 
-                # --- FORMATOS SEM BORDAS ---
-                f_tit = wb.add_format({'bold':True, 'align':'center', 'bg_color':'#D3D3D3'}) # Titulo cinza sem borda
+                # FORMATOS
+                f_tit = wb.add_format({'bold':True, 'align':'center', 'bg_color':'#D3D3D3'})
                 f_std = wb.add_format({'align':'left'})
                 f_cur = wb.add_format({'num_format':'R$ #,##0.00'})
                 f_vde = wb.add_format({'num_format':'R$ #,##0.00', 'font_color':'green', 'bold':1})
                 f_vrm = wb.add_format({'num_format':'R$ #,##0.00', 'font_color':'red', 'bold':1})
                 f_neg = wb.add_format({'bold':True})
+                f_cab = wb.add_format({'bold':True, 'bg_color':'#F2F2F2', 'align':'center'}) # Cabeçalho da tabela
 
                 for f, df in banco.items():
                     aba = re.sub(r'[\\/*?:\[\]]', '', f)[:31]
                     ws = wb.add_worksheet(aba)
-                    ws.hide_gridlines(2) # Apaga as linhas cinzas de fundo
+                    ws.hide_gridlines(2)
                     writer.sheets[aba] = ws
                     
                     # Nome da Empresa
                     ws.merge_range('B2:M3', f"EMPRESA: {nome_emp}", f_tit)
-                    
-                    # Nome do Fornecedor
                     ws.write('B8', f"FORNECEDOR: {f}", f_neg)
                     
-                    # Tabela Razão (Linha 10)
-                    df.to_excel(writer, sheet_name=aba, startrow=9, startcol=1, index=False)
+                    # --- TABELA RAZÃO (Linha 10) ---
+                    # Escrevemos os cabeçalhos manualmente para dar estilo de tabela
+                    for col_num, value in enumerate(df.columns.values):
+                        ws.write(9, col_num + 1, value, f_cab)
+                    df.to_excel(writer, sheet_name=aba, startrow=10, startcol=1, index=False, header=False)
                     
                     # Totais do Razão no Final
                     row_razao_fim = 10 + len(df)
@@ -77,22 +92,29 @@ if arquivo:
                     ws.write(row_razao_fim, 4, df['Deb'].sum(), f_cur)
                     ws.write(row_razao_fim, 5, df['Cred'].sum(), f_cur)
                     
-                    # Tabela Conciliação
+                    # --- TABELA CONCILIAÇÃO ---
                     res = df.groupby("NF").agg({"Deb":"sum", "Cred":"sum"}).reset_index()
                     res["Dif"] = res["Deb"] + res["Cred"]
-                    res.to_excel(writer, sheet_name=aba, startrow=9, startcol=7, index=False)
                     
-                    # Saldo Final da Conciliação
+                    # Cabeçalhos da Conciliação
+                    for col_num, value in enumerate(res.columns.values):
+                        ws.write(9, col_num + 8, value, f_cab)
+                    res.to_excel(writer, sheet_name=aba, startrow=10, startcol=8, index=False, header=False)
+                    
+                    # Saldo Final
                     row_res_fim = 10 + len(res)
                     saldo = res["Dif"].sum()
-                    ws.write(row_res_fim, 8, "Saldo Final:", f_neg)
-                    ws.write(row_res_fim, 9, saldo, f_vde if saldo >= 0 else f_vrm)
+                    ws.write(row_res_fim, 9, "Saldo Final:", f_neg)
+                    ws.write(row_res_fim, 10, saldo, f_vde if saldo >= 0 else f_vrm)
                     
-                    # Alarga as colunas mas SEM aplicar bordas
-                    ws.set_column('B:Z', 18, f_cur)
+                    # Ajuste das colunas
+                    ws.set_column('B:C', 10, f_std) # Data e NF curtas
+                    ws.set_column('D:D', 30, f_std) # Histórico largo
+                    ws.set_column('E:F', 15, f_cur) # Valores
+                    ws.set_column('I:K', 15, f_cur) # Conciliação
 
-            st.success("✅ Relatório limpo e pronto!")
-            st.download_button("📥 Baixar Excel Sem Bordas", out.getvalue(), "conciliacao_clean.xlsx")
+            st.success("✅ Tabelas organizadas com datas curtas!")
+            st.download_button("📥 Baixar Excel Estilo Tabela", out.getvalue(), "conciliacao_tabelada.xlsx")
             
     except Exception as e:
-        st.error(f"Erro ao limpar: {e}")
+        st.error(f"Erro ao formatar tabelas: {e}")
