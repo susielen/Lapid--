@@ -87,12 +87,13 @@ if arquivo is not None:
                 fmt_contabil = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
                 preenchimento_cinza = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
                 
-                # --- TOPO ---
+                # --- 1. TOPO MESCLADO ATÉ M ---
                 sheet.merge_cells('A1:M1')
                 sheet['A1'] = forn
                 sheet['A1'].font = Font(bold=True, size=14)
                 sheet['A1'].alignment = Alignment(horizontal='center')
 
+                # --- 2. TOTAIS ---
                 sheet.cell(row=3, column=4, value="TOTAIS").font = Font(bold=True)
                 sheet.cell(row=3, column=6, value="SALDO").font = Font(bold=True)
 
@@ -100,4 +101,20 @@ if arquivo is not None:
                 v_deb_t.number_format = fmt_contabil
                 v_deb_t.font = Font(bold=True, color="FF0000")
 
-                v_cre_t = sheet.cell(row=4, column=5, value=df
+                v_cre_t = sheet.cell(row=4, column=5, value=df_f['Crédito'].sum())
+                v_cre_t.number_format = fmt_contabil
+                v_cre_t.font = Font(bold=True, color="00B050")
+                
+                saldo_f = df_f['Crédito'].sum() - df_f['Débito'].sum()
+                v_saldo = sheet.cell(row=4, column=6, value=saldo_f)
+                v_saldo.number_format = fmt_contabil
+                v_saldo.font = Font(bold=True, color="FF0000" if saldo_f < 0 else "00B050")
+
+                sheet.cell(row=4, column=12, value="Saldo").font = Font(bold=True)
+                v_conc_v = sheet.cell(row=4, column=13, value=saldo_f)
+                v_conc_v.number_format = fmt_contabil
+                v_conc_v.font = Font(bold=True, color="FF0000" if saldo_f < 0 else "00B050")
+
+                # --- 3. CABEÇALHOS (CINZA) ---
+                for col_idx in range(1, 14):
+                    celula = sheet.cell(row=6, column=col_idx)
