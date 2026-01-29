@@ -5,7 +5,7 @@ import re
 from openpyxl.styles import Font
 
 st.set_page_config(page_title="Conciliador Contábil Pro", layout="wide")
-st.title("🤖 Conciliador: Layout de Topo Personalizado")
+st.title("🤖 Conciliador: Cores por Tipo de Lançamento")
 
 arquivo = st.file_uploader("Suba o Razão do Domínio aqui", type=["csv", "xlsx"])
 
@@ -44,6 +44,12 @@ if arquivo is not None:
             
             data_orig = str(linha.iloc[0])
             if "/" in data_orig or (len(data_orig) >= 8 and "-" in data_orig):
+                try:
+                    data_dt = pd.to_datetime(data_orig)
+                    data_formatada = data_dt.strftime('%d/%m/%y')
+                except:
+                    data_formatada = data_orig
+
                 def limpar_num(v):
                     if pd.isna(v) or str(v).lower() == 'nan': return 0
                     v = str(v).replace('.', '').replace(',', '.')
@@ -55,7 +61,7 @@ if arquivo is not None:
                 if (deb > 0 or cre > 0) and fornecedor_atual:
                     hist = str(linha.iloc[2]).replace('nan', '')
                     dict_fornecedores[fornecedor_atual].append({
-                        'Data': data_orig, 'Nº NF': extrair_nfe(hist),
+                        'Data': data_formatada, 'Nº NF': extrair_nfe(hist),
                         'Histórico': hist, 'Débito': deb, 'Crédito': cre
                     })
 
@@ -70,8 +76,6 @@ if arquivo is not None:
                 df_c['STATUS'] = df_c['DIFERENÇA'].apply(lambda x: "OK" if abs(x) < 0.05 else "DIVERGENTE")
                 
                 nome_aba = re.sub(r'[\\/*?:\[\]]', '', forn)[:31]
-                
-                # Inicia as tabelas na linha 6
                 df_f.to_excel(writer, sheet_name=nome_aba, index=False, startrow=5)
                 df_c.to_excel(writer, sheet_name=nome_aba, index=False, startrow=5, startcol=8)
                 
@@ -81,33 +85,39 @@ if arquivo is not None:
                 cor_vermelha = Font(bold=True, color="FF0000")
                 cor_verde = Font(bold=True, color="00B050")
 
-                # --- LINHA 1: NOME ---
+                # --- LINHA 1 ---
                 sheet.cell(row=1, column=1, value=forn).font = negrito
 
-                # --- LINHA 3: TÍTULOS ---
-                sheet.cell(row=3, column=4, value="TOTAIS").font = negrito # Coluna D
-                sheet.cell(row=3, column=5, value="TOTAIS").font = negrito # Coluna E
-                sheet.cell(row=3, column=6, value="SALDO").font = negrito # Coluna F
+                # --- LINHA 3 ---
+                sheet.cell(row=3, column=4, value="TOTAIS").font = negrito
+                sheet.cell(row=3, column=6, value="SALDO").font = negrito
 
-                # --- LINHA 4: VALORES DO RAZÃO ---
-                val_deb = sheet.cell(row=4, column=4, value=df_f['Débito'].sum()) # Coluna D
-                val_cre = sheet.cell(row=4, column=5, value=df_f['Crédito'].sum()) # Coluna E
-                val_deb.number_format = val_cre.number_format = fmt_contabil
-                val_deb.font = val_cre.font = negrito
+                # --- LINHA 4: VALORES COLORIDOS ---
+                # Débito (D) em Vermelho
+                val_deb = sheet.cell(row=4, column=4, value=df_f['Débito'].sum())
+                val_deb.number_format = fmt_contabil
+                val_deb.font = cor_vermelha
 
+                # Crédito (E) em Verde
+                val_cre = sheet.cell(row=4, column=5, value=df_f['Crédito'].sum())
+                val_cre.number_format = fmt_contabil
+                val_cre.font = cor_verde
+                
+                # Saldo (F) Dinâmico
                 saldo = df_f['Crédito'].sum() - df_f['Débito'].sum()
-                val_saldo = sheet.cell(row=4, column=6, value=saldo) # Coluna F
+                val_saldo = sheet.cell(row=4, column=6, value=saldo)
                 val_saldo.number_format = fmt_contabil
                 val_saldo.font = cor_vermelha if saldo < 0 else cor_verde
 
-                # --- LINHA 4: CONCILIAÇÃO ---
-                sheet.cell(row=4, column=12, value="SALDO ABERTO").font = negrito # Coluna L
-                c_conc_saldo = sheet.cell(row=4, column=13, value=saldo) # Coluna M
+                # Conciliação no topo
+                sheet.cell(row=4, column=12, value="SALDO ABERTO").font = negrito
+                c_conc_saldo = sheet.cell(row=4, column=13, value=saldo)
                 c_conc_saldo.number_format = fmt_contabil
                 c_conc_saldo.font = cor_vermelha if saldo < 0 else cor_verde
 
-                # Formatação do corpo das tabelas
+                # Formatação do corpo
                 for r in range(7, len(df_f) + 7):
+                    sheet.cell(row=r, column=1).number_format = 'dd/mm/yy'
                     sheet.cell(row=r, column=5).number_format = fmt_contabil
                     sheet.cell(row=r, column=6).number_format = fmt_contabil
                 
@@ -115,12 +125,11 @@ if arquivo is not None:
                     sheet.cell(row=r, column=10).number_format = fmt_contabil
                     sheet.cell(row=r, column=11).number_format = fmt_contabil
                     sheet.cell(row=r, column=12).number_format = fmt_contabil
-                    # Cores no status
                     st_cell = sheet.cell(row=r, column=13)
                     st_cell.font = Font(color="00B050") if st_cell.value == "OK" else Font(color="FF0000")
 
-        st.success("✅ Relatório formatado com sucesso!")
-        st.download_button("📥 Baixar Excel Ajustado", data=output.getvalue(), file_name="conciliacao_alinhada.xlsx")
+        st.success("✅ Relatório Contábil Colorido Pronto!")
+        st.download_button("📥 Baixar Excel Final", data=output.getvalue(), file_name="conciliacao_dominio_cores.xlsx")
             
     except Exception as e:
         st.error(f"Erro: {e}")
