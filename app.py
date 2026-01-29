@@ -3,10 +3,10 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.set_page_config(page_title="Conciliador Pro", layout="wide")
-st.title("🤖 Robô Conciliador")
+st.set_page_config(page_title="Conciliador Clean", layout="wide")
+st.title("🤖 Robô Conciliador (Sem Bordas)")
 
-# Função para converter texto em número sem dar erro
+# Função para converter texto em número (sem dar erro)
 def to_num(val):
     try:
         if pd.isna(val): return 0.0
@@ -49,37 +49,51 @@ if arquivo:
             out = BytesIO()
             with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
                 wb = writer.book
-                # Estilos
-                f_tit = wb.add_format({'bold':1,'align':'center','bg_color':'#D3D3D3','border':1})
-                f_std = wb.add_format({'border':1})
-                f_cur = wb.add_format({'num_format':'R$ #,##0.00','border':1})
-                f_vde = wb.add_format({'num_format':'R$ #,##0.00','font_color':'green','bold':1,'border':1})
-                f_vrm = wb.add_format({'num_format':'R$ #,##0.00','font_color':'red', 'bold':1,'border':1})
+                
+                # --- FORMATOS SEM BORDAS (border removido) ---
+                f_tit = wb.add_format({'bold':True, 'align':'center', 'bg_color':'#D3D3D3'})
+                f_std = wb.add_format({'align':'left'})
+                f_cur = wb.add_format({'num_format':'R$ #,##0.00'})
+                f_vde = wb.add_format({'num_format':'R$ #,##0.00', 'font_color':'green', 'bold':1})
+                f_vrm = wb.add_format({'num_format':'R$ #,##0.00', 'font_color':'red', 'bold':1})
+                f_forn = wb.add_format({'bold':True, 'align':'left'})
 
                 for f, df in banco.items():
                     aba = re.sub(r'[\\/*?:\[\]]', '', f)[:31]
                     ws = wb.add_worksheet(aba)
-                    ws.hide_gridlines(2)
+                    ws.hide_gridlines(2) # Remove as linhas de grade do fundo
+                    writer.sheets[aba] = ws
                     
-                    # Cabeçalho
-                    ws.merge_range('B2:M3', f"EMPRESA: {nome_emp} | {f}", f_tit)
+                    # Nome da Empresa (Linha 2 e 3) - Agora sem borda
+                    ws.merge_range('B2:M3', f"EMPRESA: {nome_emp}", f_tit)
+                    
+                    # Nome do Fornecedor (Linha 8) - Alinhado à esquerda
+                    ws.write('B8', f"FORNECEDOR: {f}", f_forn)
                     
                     # Tabela Razão (Linha 10)
                     df.to_excel(writer, sheet_name=aba, startrow=9, startcol=1, index=False)
                     
-                    # Tabela Conciliação
+                    # Tabela Conciliação (ao lado)
                     res = df.groupby("NF").agg({"Deb":"sum", "Cred":"sum"}).reset_index()
                     res["Dif"] = res["Deb"] + res["Cred"]
                     res.to_excel(writer, sheet_name=aba, startrow=9, startcol=7, index=False)
                     
-                    # Saldo no final
+                    # Totais (Linha 9)
+                    ws.write('D9', 'Totais', f_forn)
+                    ws.write('E9', df['Deb'].sum(), f_cur)
+                    ws.write('F9', df['Cred'].sum(), f_cur)
+                    
+                    # Saldo Final
                     row = 10 + len(res)
                     saldo = res["Dif"].sum()
                     ws.write(row, 8, "Saldo Final:", f_std)
                     ws.write(row, 9, saldo, f_vde if saldo >= 0 else f_vrm)
-                    ws.set_column('B:Z', 15, f_cur)
+                    
+                    # Ajuste de largura das colunas
+                    ws.set_column('B:Z', 18, f_cur)
 
-            st.success("✅ Relatório pronto!")
-            st.download_button("📥 Baixar Excel", out.getvalue(), "conciliacao.xlsx")
+            st.success("✅ Excel gerado sem nenhuma borda!")
+            st.download_button("📥 Baixar Planilha Clean", out.getvalue(), "conciliacao_sem_bordas.xlsx")
+            
     except Exception as e:
-        st.error(f"Erro no processamento: {e}")
+        st.error(f"Erro: {e}")
