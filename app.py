@@ -1,117 +1,86 @@
 import streamlit as st
 import pandas as pd
-import io, re
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from openpyxl.utils import get_column_letter
+import re
 
-# 1. Configuração da Página
-st.set_page_config(page_title="Conciliador Contábil", layout="wide")
-st.title("🤖 Conciliador: Versão Oficial")
+st.set_page_config(page_title="Conciliador de Fornecedores", layout="wide")
 
-# 2. Upload do Arquivo
-arquivo = st.file_uploader("Suba o seu arquivo (Razão)", type=["csv", "xlsx"])
+st.title("📑 Conciliação por Fornecedor (Domínio)")
 
-def limpar(s):
-    return str(s).replace('nan', '').replace('NAN', '').replace('NaN', '').strip()
+arquivo = st.file_uploader("Suba o arquivo Razão do Domínio (CSV)", type=["csv"])
 
-def extrair_nf(t):
-    m = re.search(r'(?:NFE|NF|NOTA|Nº)\s*(\d+)', str(t).upper())
-    return int(m.group(1)) if m else ""
+if arquivo:
+    # Lendo o arquivo
+    df = pd.read_csv(arquivo, skip_blank_lines=True)
+    
+    # Dicionário para guardar os dados de cada fornecedor
+    banco_fornecedores = {}
+    fornecedor_atual = None
+    dados_acumulados = []
 
-if arquivo is not None:
-    try:
-        # 3. Lendo os dados
-        df_raw = pd.read_excel(arquivo) if arquivo.name.endswith('.xlsx') else pd.read_csv(arquivo, encoding='latin-1', sep=None, engine='python')
+    # --- PARTE 1: O Robô Detetive separa os dados ---
+    for _, linha in df.iterrows():
+        # Identifica a linha de "Conta:" que tem o nome do fornecedor
+        if str(linha[0]).startswith("Conta:"):
+            # Se já vínhamos guardando dados de outro fornecedor, salva antes de mudar
+            if fornecedor_atual and dados_acumulados:
+                banco_fornecedores[fornecedor_atual] = pd.DataFrame(dados_acumulados)
+            
+            # Pega o nome do novo fornecedor
+            fornecedor_atual = str(linha[5]) if pd.notna(linha[5]) else str(linha[2])
+            dados_acumulados = []
+            continue
         
-        # Identifica o nome da Empresa
-        L1 = " ".join([str(v) for v in df_raw.iloc[0].values])
-        empresa = limpar(L1.upper().split("EMPRESA:")[-1].split("CNPJ:")[0]) or "EMPRESA"
+        # Se a linha tem data (formato AAAA-MM-DD), é um movimento
+        if pd.notna(linha[0]) and re.match(r'\d{4}-\d{2}-\d{2}', str(linha[0])):
+            debito = float(str(linha[8]).replace(',', '.')) if pd.notna(linha[8]) else 0
+            credito = float(str(linha[9]).replace(',', '.')) if pd.notna(linha[9]) else 0
+            
+            # Tenta extrair o número da nota do histórico
+            historico = str(linha[2])
+            nfe = re.findall(r'NFe\s(\d+)', historico)
+            num_nota = nfe[0] if nfe else "S/N"
+            
+            dados_acumulados.append({
+                "Data": linha[0],
+                "Histórico": historico,
+                "NF": num_nota,
+                "Débito (Pago)": debito,
+                "Crédito (Comprou)": credito
+            })
+    
+    # Salva o último fornecedor da lista
+    if fornecedor_atual:
+        banco_fornecedores[fornecedor_atual] = pd.DataFrame(dados_acumulados)
 
-        resumo, forn = {}, None
-        
-        # 4. Organizando as gavetas (Fornecedores)
-        for i, linha in df_raw.iterrows():
-            txt = " ".join([str(v) for v in linha.values]).upper()
-            if "CONTA:" in txt:
-                m_c = re.search(r'CONTA:\s*(\d+)', txt)
-                c_id = m_c.group(1) if m_c else ""
-                n_f = txt.split("CONTA:")[-1].replace('NOME:', '').strip()
-                n_f = re.sub(r'(\d+\.)+\d+', '', n_f).replace(c_id, '').strip()
-                n_f = re.sub(r'^[ \-_]+', '', n_f)
-                forn = f"{c_id} - {n_f}" if c_id else n_f
-                resumo[forn] = []
-            elif forn and ("/" in str(linha.iloc[0]) or "-" in str(linha.iloc[0])):
-                def p_f(v):
-                    v = str(v).replace('.', '').replace(',', '.')
-                    try: return float(v)
-                    except: return 0.0
-                d, c = p_f(linha.iloc[8]), p_f(linha.iloc[9])
-                if d > 0 or c > 0:
-                    h = limpar(linha.iloc[2])
-                    try: dt = pd.to_datetime(linha.iloc[0], dayfirst=True)
-                    except: dt = str(linha.iloc[0])
-                    resumo[forn].append({'Data':dt, 'Nº NF':extrair_nf(h), 'Histórico':h, 'Débito':d, 'Crédito':c})
+    # --- PARTE 2: Criando as abas e colocando lado a lado ---
+    if banco_fornecedores:
+        nomes_fornecedores = list(banco_fornecedores.keys())
+        abas = st.tabs(nomes_fornecedores) # Cria uma aba para cada nome
 
-        # 5. Criando o arquivo Excel final
-        out = io.BytesIO()
-        with pd.ExcelWriter(out, engine='openpyxl') as writer:
-            for nm, dd in resumo.items():
-                if not dd: continue
-                df_f = pd.DataFrame(dd)
-                df_c = df_f.groupby('Nº NF').agg({'Débito':'sum', 'Crédito':'sum'}).reset_index()
-                df_c['DIFERENÇA'] = df_c['Crédito'] - df_f['Débito'].sum() 
-                df_c['STATUS'] = df_c['DIFERENÇA'].apply(lambda x: "OK" if abs(x) < 0.05 else "DIVERGENTE")
+        for i, nome in enumerate(nomes_fornecedores):
+            with abas[i]:
+                st.subheader(f"Fornecedor: {nome}")
                 
-                aba = re.sub(r'[\\/*?:\[\]]', '', nm)[:31]
-                df_f.to_excel(writer, sheet_name=aba, index=False, startrow=9, startcol=1)
-                df_c.to_excel(writer, sheet_name=aba, index=False, startrow=9, startcol=9)
-                ws = writer.sheets[aba]
+                df_razao = banco_fornecedores[nome]
                 
-                # Estilos
-                f_branco = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-                for r in range(1, 150):
-                    for col in range(1, 20): ws.cell(row=r, column=col).fill = f_branco
+                # Criando a Conciliação (Resumo por Nota)
+                df_conciliado = df_razao.groupby("NF").agg({
+                    "Débito (Pago)": "sum",
+                    "Crédito (Comprou)": "sum"
+                }).reset_index()
+                df_conciliado["Diferença"] = df_conciliado["Débito (Pago)"] - df_conciliado["Crédito (Comprou)"]
+                df_conciliado["Status"] = df_conciliado["Diferença"].apply(lambda x: "✅ OK" if x == 0 else "🚩 Erro")
+
+                # Juntando Razão + 3 Colunas Vazias + Conciliação
+                espaco_vazio = pd.DataFrame({"": [""] * len(df_razao)})
                 
-                borda = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-                ac, ar, al = Alignment(horizontal='center'), Alignment(horizontal='right'), Alignment(horizontal='left')
-                format_moeda = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
-
-                # Cabeçalho
-                ws.column_dimensions['A'].width = 2
-                ws.merge_cells('B2:N2'); ws['B2'] = empresa
-                ws['B2'].font, ws['B2'].alignment = Font(bold=True, size=12), al
-                ws.merge_cells('B4:N4'); ws['B4'] = nm
-                ws['B4'].font, ws['B4'].alignment = Font(bold=True, size=13), al
-
-                # Saldo
-                ws.cell(row=6, column=5, value="SALDO").font = Font(bold=True)
-                ws.cell(row=6, column=5).alignment = ar
-                v_saldo = df_f['Crédito'].sum() - df_f['Débito'].sum()
-                celula_s = ws.cell(row=6, column=6, value=v_saldo)
-                celula_s.font, celula_s.border, celula_s.number_format = Font(bold=True, color="FF0000" if v_saldo < 0 else "00B050"), borda, format_moeda
-
-                # --- AJUSTE SOLICITADO: TOTAIS À ESQUERDA ---
-                ws.cell(row=8, column=4, value="TOTAIS").font = Font(bold=True)
-                ws.cell(row=8, column=4).alignment = al # Aqui ele "encosta" na esquerda
+                # Criando a visualização lado a lado usando colunas do Streamlit
+                col_esq, col_dir = st.columns([1.5, 1]) # O Razão é maior que a Conciliação
                 
-                for ci, v, cor in [(5, df_f['Débito'].sum(), "FF0000"), (6, df_f['Crédito'].sum(), "00B050")]:
-                    cel = ws.cell(row=8, column=ci, value=v)
-                    cel.font, cel.border, cel.number_format = Font(bold=True, color=cor), borda, format_moeda
-
-                # Ajuste de Colunas
-                for c in range(2, 15):
-                    ws.cell(row=10, column=c).font = Font(bold=True)
-                    ws.cell(row=10, column=c).alignment = ac
-                    L = get_column_letter(c)
-                    ws.column_dimensions[L].width = 45 if L=='D' else 18
+                with col_esq:
+                    st.write("**📄 Razão Detalhado**")
+                    st.dataframe(df_razao, use_container_width=True)
                 
-                # Formatação das linhas de dados
-                for r in range(11, 11 + len(df_f)):
-                    ws.cell(row=r, column=2).number_format = 'dd/mm/yyyy'
-                    ws.cell(row=r, column=6).number_format = format_moeda
-                    ws.cell(row=r, column=7).number_format = format_moeda
-
-        st.success("✅ O Robô terminou o trabalho!")
-        st.download_button("📥 Baixar Planilha Oficial Atualizada", out.getvalue(), "conciliacao_alinhada.xlsx")
-    except Exception as e:
-        st.error(f"Houve um pequeno problema: {e}")
+                with col_dir:
+                    st.write("**⚖️ Conciliação (Resumo)**")
+                    st.dataframe(df_conciliado, use_container_width=True)
