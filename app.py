@@ -6,7 +6,7 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="Conciliador Contábil Pro", layout="wide")
-st.title("🤖 Conciliador: Versão Estável e Final")
+st.title("🤖 Conciliador: Versão Super Estável")
 
 arquivo = st.file_uploader("Suba o Razão do Domínio aqui", type=["csv", "xlsx"])
 
@@ -83,19 +83,28 @@ if arquivo is not None:
                 sheet = writer.sheets[nome_aba]
                 
                 fmt_contabil = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
-                borda_fina = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-                alinhar_centro = Alignment(horizontal='center')
-                alinhar_direita = Alignment(horizontal='right')
+                borda = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                centro = Alignment(horizontal='center')
+                direita = Alignment(horizontal='right')
 
-                # 1. TÍTULO
+                # TÍTULO
                 sheet.merge_cells('A1:M1')
                 sheet['A1'] = forn
                 sheet['A1'].font = Font(bold=True, size=14)
-                sheet['A1'].alignment = alinhar_centro
+                sheet['A1'].alignment = centro
 
-                # 2. SALDO (LINHA 3)
+                # SALDO (LINHA 3)
                 sheet.cell(row=3, column=4, value="SALDO").font = Font(bold=True)
-                sheet.cell(row=3, column=4).alignment = alinhar_direita
+                sheet.cell(row=3, column=4).alignment = direita
                 saldo_val = df_f['Crédito'].sum() - df_f['Débito'].sum()
-                c_saldo = sheet.cell(row=3, column=5, value=saldo_val)
-                
+                c_s = sheet.cell(row=3, column=5, value=saldo_val)
+                c_s.number_format = fmt_contabil
+                c_s.font = Font(bold=True, color="FF0000" if saldo_val < 0 else "00B050")
+                c_s.border = borda
+
+                # TOTAIS E CONCILIAÇÃO (LINHA 5)
+                sheet.cell(row=5, column=3, value="TOTAIS").font = Font(bold=True)
+                sheet.cell(row=5, column=3).alignment = direita
+                for c, v in [(4, df_f['Débito'].sum()), (5, df_f['Crédito'].sum())]:
+                    cel = sheet.cell(row=5, column=c, value=v)
+                    cel.number_format
