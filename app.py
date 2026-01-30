@@ -23,12 +23,11 @@ def to_num(val):
 
 with st.sidebar:
     st.header("⚙️ Painel")
-    # Dica: Se o nome do arquivo tiver "cliente", o robô usa a regra de sinais de cliente!
     tipo_robo = st.radio("Este robô é de:", ["Cliente", "Fornecedor"])
     arquivo = st.file_uploader("Suba o arquivo aqui", type=["xlsx", "csv"])
 
 if arquivo:
-    with st.spinner('💎 Lapidando com as novas regras...'):
+    with st.spinner('💎 Pintando e ajustando alturas...'):
         try:
             time.sleep(1)
             df_bruto = pd.read_excel(arquivo, header=None) if arquivo.name.endswith('xlsx') else pd.read_csv(arquivo, header=None)
@@ -59,11 +58,10 @@ if arquivo:
                         nf_f = re.findall(r'NFe\s?(\d+)', hist)
                         nf = nf_f[0] if nf_f else (str(lin[1]).strip() if pd.notna(lin[1]) else "S/N")
                         
-                        # APLICAÇÃO DA REGRA DE SINAIS QUE VOCÊ PEDIU
                         if tipo_robo == "Fornecedor":
-                            val_deb, val_cre = -deb, cre  # Deb Negativo, Cred Positivo
+                            val_deb, val_cre = -deb, cre
                         else:
-                            val_deb, val_cre = deb, -cre  # Deb Positivo, Cred Negativo
+                            val_deb, val_cre = deb, -cre
                             
                         dados.append({"Data": dt, "NF": nf, "Hist": hist, "Deb": val_deb, "Cred": val_cre})
 
@@ -76,11 +74,15 @@ if arquivo:
                     f_cent = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
                     f_moeda = wb.add_format({'num_format': 'R$ #,##0.00', 'border': 1})
                     f_std = wb.add_format({'border': 1})
+                    
+                    # Formato Cabeçalho (Cinza)
                     f_cab = wb.add_format({'bold': 1, 'bg_color': '#F2F2F2', 'align': 'center', 'valign': 'vcenter', 'border': 1})
+                    
+                    # Formato Empresa (Linha 2)
                     f_empresa = wb.add_format({'bold': 1, 'font_size': 14, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#D3D3D3', 'border': 1})
+                    
                     f_vde = wb.add_format({'num_format': 'R$ #,##0.00', 'font_color': 'green', 'bold': 1, 'border': 1, 'align': 'center'})
                     f_vrm = wb.add_format({'num_format': 'R$ #,##0.00', 'font_color': 'red', 'bold': 1, 'border': 1, 'align': 'center'})
-                    f_info_b = wb.add_format({'bold': 1, 'font_size': 11, 'border': 1, 'valign': 'vcenter', 'align': 'center'})
 
                     for cod, df in banco.items():
                         ws = wb.add_worksheet(str(cod)[:31])
@@ -93,22 +95,20 @@ if arquivo:
                         ws.set_column('G:H', 1)
                         ws.set_column('I:L', 18)
                         
-                        ws.set_row(1, 30)
+                        # AJUSTE: Altura da Linha 2 diminuída para 22 (estava 30)
+                        ws.set_row(1, 22)
                         ws.merge_range('B2:L2', f"EMPRESA: {nome_emp}", f_empresa)
                         
-                        # LINHA 5 SEM A PALAVRA "FORNECEDOR"
-                        ws.merge_range('B5:F5', f_info[cod], f_info_b)
+                        # AJUSTE: Nome pintadinho igual à conciliação (f_cab)
+                        ws.merge_range('B5:F5', f_info[cod], f_cab)
                         ws.merge_range('I5:L5', "CONCILIAÇÃO POR NOTA", f_cab)
                         
                         for ci, v in enumerate(["Data","NF","Histórico","Débito","Crédito"]):
                             ws.write(6, ci+1, v, f_cab)
                         
                         for ri, row in enumerate(df.values):
-                            ws.write(7+ri, 1, row[0], f_cent)
-                            ws.write(7+ri, 2, row[1], f_cent)
-                            ws.write(7+ri, 3, row[2], f_std)
-                            ws.write(7+ri, 4, row[3], f_moeda)
-                            ws.write(7+ri, 5, row[4], f_moeda)
+                            ws.write(7+ri, 1, row[0], f_cent); ws.write(7+ri, 2, row[1], f_cent)
+                            ws.write(7+ri, 3, row[2], f_std); ws.write(7+ri, 4, row[3], f_moeda); ws.write(7+ri, 5, row[4], f_moeda)
                         
                         lt = 7 + len(df) + 1 
                         ws.write(lt, 3, "TOTALIZADOR:", f_cab)
@@ -122,15 +122,13 @@ if arquivo:
                         
                         for ri, row in enumerate(res.values):
                             ws.write(7+ri, 8, str(row[0]), f_cent)
-                            ws.write(7+ri, 9, row[1], f_moeda)
-                            ws.write(7+ri, 10, row[2], f_moeda)
-                            ws.write(7+ri, 11, row[3], f_moeda)
+                            ws.write(7+ri, 9, row[1], f_moeda); ws.write(7+ri, 10, row[2], f_moeda); ws.write(7+ri, 11, row[3], f_moeda)
                         
                         rf = 8 + len(res)
                         ws.write(rf, 10, "Saldo Final:", f_cab)
                         ws.write(rf, 11, s := res["Dif"].sum(), f_vde if s >= 0 else f_vrm)
                 
-                st.success("✅ Relatório lapidado com as novas regras de sinais e sem a palavra fornecedor!")
+                st.success("✅ Tudo pintadinho e alinhado como você pediu!")
                 st.download_button("📥 Baixar Planilha", out.getvalue(), "relatorio_lapidado.xlsx")
         except Exception as e:
             st.error(f"Erro: {e}")
