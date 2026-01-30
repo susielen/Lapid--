@@ -27,7 +27,7 @@ with st.sidebar:
     arquivo = st.file_uploader("Suba o arquivo aqui", type=["xlsx", "csv"])
 
 if arquivo:
-    with st.spinner('💎 Ajustando linhas e tirando triângulos...'):
+    with st.spinner('💎 Ajustando as alturas das linhas 1, 3 e 5...'):
         try:
             time.sleep(1)
             df_bruto = pd.read_excel(arquivo, header=None) if arquivo.name.endswith('xlsx') else pd.read_csv(arquivo, header=None)
@@ -71,8 +71,6 @@ if arquivo:
                 out = BytesIO()
                 with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
                     wb = writer.book
-                    
-                    # 🪄 MÁGICA 1: Tira os triângulos verdes (erros de número como texto)
                     wb.set_custom_property('ignore_errors', True) 
                     
                     f_cent = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
@@ -86,11 +84,9 @@ if arquivo:
                     for cod, df in banco.items():
                         ws = wb.add_worksheet(str(cod)[:31])
                         ws.hide_gridlines(2)
-                        
-                        # 🪄 MÁGICA 2: Ignora erros de números armazenados como texto na planilha toda
                         ws.ignore_errors({'number_stored_as_text': 'A1:X1000'})
                         
-                        # COLUNAS
+                        # Colunas
                         ws.set_column('A:A', 1)
                         ws.set_column('B:C', 15)
                         ws.set_column('D:D', 45)
@@ -98,24 +94,25 @@ if arquivo:
                         ws.set_column('G:H', 1)
                         ws.set_column('I:L', 18)
                         
-                        # 🪄 MÁGICA 3: Linha 1 fininha (igual coluna A) e tudo começa na Linha 4
-                        ws.set_row(0, 1) # Linha 1 quase invisível
-                        ws.set_row(1, 22) # Linha 2 (Empresa)
-                        ws.set_row(2, 5)  # Linha 3 (Espaço pequeno)
+                        # AJUSTE DE ALTURAS DAS LINHAS
+                        ws.set_row(0, 9)   # Linha 1: Altura 9
+                        ws.set_row(1, 22)  # Linha 2: Empresa
+                        ws.set_row(2, 12)  # Linha 3: Altura 12
+                        ws.set_row(3, 20)  # Linha 4: Nome Fornecedor / Conciliação
+                        ws.set_row(4, 15)  # Linha 5: Altura 15
                         
-                        # EMPRESA NA LINHA 2 (Começa aqui)
+                        # Empresa (Linha 2)
                         ws.merge_range('B2:L2', f"EMPRESA: {nome_emp}", f_empresa)
                         
-                        # INFORMAÇÕES NA LINHA 4 (B4 até L4)
-                        ws.set_row(3, 20) # Linha 4
+                        # Informações (Linha 4)
                         ws.merge_range('B4:F4', f_info[cod], f_cab)
                         ws.merge_range('I4:L4', "CONCILIAÇÃO POR NOTA", f_cab)
                         
-                        # Cabeçalhos na Linha 5
+                        # Cabeçalhos na Linha 6 (index 5)
                         for ci, v in enumerate(["Data","NF","Histórico","Débito","Crédito"]):
                             ws.write(5, ci+1, v, f_cab)
                         
-                        # Dados começam na Linha 6
+                        # Dados
                         for ri, row in enumerate(df.values):
                             ws.write(6+ri, 1, row[0], f_cent); ws.write(6+ri, 2, row[1], f_cent)
                             ws.write(6+ri, 3, row[2], f_std); ws.write(6+ri, 4, row[3], f_moeda); ws.write(6+ri, 5, row[4], f_moeda)
@@ -138,7 +135,7 @@ if arquivo:
                         ws.write(rf, 10, "Saldo Final:", f_cab)
                         ws.write(rf, 11, s := res["Dif"].sum(), f_vde if s >= 0 else f_vrm)
                 
-                st.success("✅ Feito! Sem triângulos, linha 1 fininha e tudo começando na linha 4!")
-                st.download_button("📥 Baixar Planilha", out.getvalue(), "relatorio_finalizado.xlsx")
+                st.success("✅ Alturas ajustadas: Linha 1 (9), Linha 3 (12) e Linha 5 (15)!")
+                st.download_button("📥 Baixar Planilha", out.getvalue(), "relatorio_lapidado.xlsx")
         except Exception as e:
             st.error(f"Erro: {e}")
