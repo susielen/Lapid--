@@ -3,8 +3,9 @@ import pandas as pd
 import re
 from io import BytesIO
 
-st.set_page_config(page_title="Conciliador Mestre", layout="wide")
-st.title("🤖 Robô Conciliador - Versão Clean")
+# O nome agora é LAPIDÔ!
+st.set_page_config(page_title="LAPIDÔ", layout="wide")
+st.title("💎 LAPIDÔ: Lapidando suas Contas com Perfeição")
 
 def to_num(val):
     try:
@@ -13,7 +14,7 @@ def to_num(val):
         return float(v)
     except: return 0.0
 
-arquivo = st.file_uploader("Suba o arquivo XLSX ou CSV", type=["xlsx", "csv"])
+arquivo = st.file_uploader("Entregue a pedra bruta (arquivo) para o LAPIDÔ", type=["xlsx", "csv"])
 
 if arquivo:
     try:
@@ -34,9 +35,7 @@ if arquivo:
             if "Conta:" in str(lin[0]):
                 if f_cod_atual and dados: 
                     banco[f_cod_atual] = pd.DataFrame(dados)
-                
                 f_cod_atual = str(lin[1]).strip()
-                # Guarda apenas Código - Nome (sem a palavra "Fornecedor")
                 nome_completo = f"{f_cod_atual} - {str(lin[5]) if pd.notna(lin[5]) else str(lin[2])}"
                 f_info[f_cod_atual] = nome_completo
                 dados = []
@@ -69,14 +68,11 @@ if arquivo:
                     aba = re.sub(r'[\\/*?:\[\]]', '', cod)[:31]
                     ws = wb.add_worksheet(aba)
                     ws.hide_gridlines(2)
-                    
                     ws.set_column('A:A', 0.5) 
                     ws.set_row(0, 5) 
                     ws.ignore_errors({'number_stored_as_text': 'B1:L5000'})
                     
                     ws.merge_range('B2:M3', f"EMPRESA: {nome_emp}", f_tit)
-                    
-                    # --- LINHA 5: APENAS CÓDIGO - NOME (Sem a palavra Fornecedor) ---
                     ws.merge_range('B5:F5', f_info[cod], f_cab)
                     ws.merge_range('I5:L5', 'Conciliação por nota', f_cab)
                     
@@ -118,7 +114,7 @@ if arquivo:
                     ws.set_column('G:H', 2)
                     ws.set_column('I:L', 18)
 
-            st.success("✅ Ajuste feito! A palavra 'Fornecedor' foi removida.")
-            st.download_button("📥 Baixar Excel Clean", out.getvalue(), "conciliacao_clean.xlsx")
+            st.success("✨ O LAPIDÔ deixou tudo brilhando!")
+            st.download_button("📥 Baixar Diamante (Planilha)", out.getvalue(), "contas_lapidadas.xlsx")
     except Exception as e:
         st.error(f"Erro: {e}")
