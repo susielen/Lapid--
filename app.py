@@ -3,6 +3,7 @@ import pandas as pd
 import re
 from io import BytesIO
 import time
+import random
 
 # 1. Configuração
 st.set_page_config(page_title="LAPIDÔ", layout="wide")
@@ -27,7 +28,7 @@ with st.sidebar:
     arquivo = st.file_uploader("Suba o arquivo aqui", type=["xlsx", "csv"])
 
 if arquivo:
-    with st.spinner('💎 Ajustando as alturas das linhas 1, 3 e 5...'):
+    with st.spinner('💎 Colorindo as abas e ajustando tudo...'):
         try:
             time.sleep(1)
             df_bruto = pd.read_excel(arquivo, header=None) if arquivo.name.endswith('xlsx') else pd.read_csv(arquivo, header=None)
@@ -69,6 +70,9 @@ if arquivo:
 
             if banco:
                 out = BytesIO()
+                # Lista de cores bonitas para as abas
+                cores_abas = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080', '#008000']
+                
                 with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
                     wb = writer.book
                     wb.set_custom_property('ignore_errors', True) 
@@ -81,12 +85,16 @@ if arquivo:
                     f_vde = wb.add_format({'num_format': 'R$ #,##0.00', 'font_color': 'green', 'bold': 1, 'border': 1, 'align': 'center'})
                     f_vrm = wb.add_format({'num_format': 'R$ #,##0.00', 'font_color': 'red', 'bold': 1, 'border': 1, 'align': 'center'})
 
-                    for cod, df in banco.items():
+                    for idx, (cod, df) in enumerate(banco.items()):
                         ws = wb.add_worksheet(str(cod)[:31])
+                        
+                        # 🪄 MÁGICA: COLORIR A ABA
+                        cor_escolhida = cores_abas[idx % len(cores_abas)]
+                        ws.set_tab_color(cor_escolhida)
+                        
                         ws.hide_gridlines(2)
                         ws.ignore_errors({'number_stored_as_text': 'A1:X1000'})
                         
-                        # Colunas
                         ws.set_column('A:A', 1)
                         ws.set_column('B:C', 15)
                         ws.set_column('D:D', 45)
@@ -94,25 +102,20 @@ if arquivo:
                         ws.set_column('G:H', 1)
                         ws.set_column('I:L', 18)
                         
-                        # AJUSTE DE ALTURAS DAS LINHAS
-                        ws.set_row(0, 9)   # Linha 1: Altura 9
+                        # Alturas solicitadas
+                        ws.set_row(0, 9)   # Linha 1: 9
                         ws.set_row(1, 22)  # Linha 2: Empresa
-                        ws.set_row(2, 12)  # Linha 3: Altura 12
-                        ws.set_row(3, 20)  # Linha 4: Nome Fornecedor / Conciliação
-                        ws.set_row(4, 15)  # Linha 5: Altura 15
+                        ws.set_row(2, 12)  # Linha 3: 12
+                        ws.set_row(3, 20)  # Linha 4: Info Forn/Conc
+                        ws.set_row(4, 15)  # Linha 5: 15
                         
-                        # Empresa (Linha 2)
                         ws.merge_range('B2:L2', f"EMPRESA: {nome_emp}", f_empresa)
-                        
-                        # Informações (Linha 4)
                         ws.merge_range('B4:F4', f_info[cod], f_cab)
                         ws.merge_range('I4:L4', "CONCILIAÇÃO POR NOTA", f_cab)
                         
-                        # Cabeçalhos na Linha 6 (index 5)
                         for ci, v in enumerate(["Data","NF","Histórico","Débito","Crédito"]):
                             ws.write(5, ci+1, v, f_cab)
                         
-                        # Dados
                         for ri, row in enumerate(df.values):
                             ws.write(6+ri, 1, row[0], f_cent); ws.write(6+ri, 2, row[1], f_cent)
                             ws.write(6+ri, 3, row[2], f_std); ws.write(6+ri, 4, row[3], f_moeda); ws.write(6+ri, 5, row[4], f_moeda)
@@ -126,7 +129,6 @@ if arquivo:
                         res["Dif"] = res["Deb"] + res["Cred"]
                         for ci, v in enumerate(["NF","Deb","Cred","Dif"]):
                             ws.write(5, ci+8, v, f_cab)
-                        
                         for ri, row in enumerate(res.values):
                             ws.write(6+ri, 8, str(row[0]), f_cent)
                             ws.write(6+ri, 9, row[1], f_moeda); ws.write(6+ri, 10, row[2], f_moeda); ws.write(6+ri, 11, row[3], f_moeda)
@@ -135,7 +137,7 @@ if arquivo:
                         ws.write(rf, 10, "Saldo Final:", f_cab)
                         ws.write(rf, 11, s := res["Dif"].sum(), f_vde if s >= 0 else f_vrm)
                 
-                st.success("✅ Alturas ajustadas: Linha 1 (9), Linha 3 (12) e Linha 5 (15)!")
-                st.download_button("📥 Baixar Planilha", out.getvalue(), "relatorio_lapidado.xlsx")
+                st.success("✅ Arco-íris ativado! As abas estão coloridas e as alturas ajustadas.")
+                st.download_button("📥 Baixar Relatório Colorido", out.getvalue(), "relatorio_lapidado.xlsx")
         except Exception as e:
             st.error(f"Erro: {e}")
