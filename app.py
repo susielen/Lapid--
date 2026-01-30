@@ -4,10 +4,10 @@ import re
 from io import BytesIO
 import time
 
-# 1. Configuração
+# Configuração
 st.set_page_config(page_title="LAPIDÔ", layout="wide")
 
-# 2. Título Igual (Azul)
+# Título Azul - O Mestre das Contas
 st.markdown("""
     <style>
     .titulo {color: #1E90FF; font-size: 40px; font-weight: bold; text-align: center; padding: 10px;}
@@ -35,7 +35,7 @@ if arquivo:
                 if "Empresa:" in str(df_bruto.iloc[i, 0]):
                     nome_emp = str(df_bruto.iloc[i, 2])
                     break
-            banco, f_info = {}, {}
+            banco = {}
             f_cod, dados = None, []
             for i in range(len(df_bruto)):
                 lin = df_bruto.iloc[i]
@@ -81,4 +81,3 @@ if arquivo:
                 st.success("✅ O Mestre terminou a lapidação!")
                 st.download_button("📥 Baixar Excel", out.getvalue(), "fornecedores.xlsx")
         except Exception as e: st.error(f"Erro: {e}")
-else: st.info("👈 Suba o arquivo na lateral.")
