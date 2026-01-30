@@ -7,7 +7,7 @@ import time
 # 1. Configuração da Página
 st.set_page_config(page_title="LAPIDÔ", page_icon="💎", layout="wide")
 
-# 2. Estilo do Título
+# 2. Título do Site
 st.markdown("""
     <style>
     .titulo {
@@ -15,7 +15,7 @@ st.markdown("""
         font-size: 48px;
         font-weight: bold;
         text-align: center;
-        padding: 20px;
+        padding: 10px;
     }
     </style>
     <p class="titulo">💎 LAPIDÔ: O Mestre das Contas</p>
@@ -28,20 +28,20 @@ def to_num(val):
         return float(v)
     except: return 0.0
 
-# 3. Painel Lateral
+# 3. Barra Lateral
 with st.sidebar:
     st.header("⚙️ Painel de Controle")
     arquivo = st.file_uploader("Suba seu arquivo aqui", type=["xlsx", "csv"])
     st.divider()
-    st.info("As colunas G e H agora estão bem fininhas!")
+    st.info("Colunas G e H ajustadas para ficarem fininhas.")
 
-# 4. Processamento
+# 4. O Polimento do Diamante
 if not arquivo:
-    st.warning("👈 Coloque o arquivo na barra lateral para começar.")
+    st.warning("👈 O LAPIDÔ aguarda o arquivo na gavetinha lateral.")
 else:
-    with st.spinner('💎 Polindo o diamante... Ajustando as colunas...'):
+    with st.spinner('💎 Polindo a pedra bruta... Formando o diamante...'):
         try:
-            time.sleep(1.2) 
+            time.sleep(1.5)
             df_bruto = pd.read_excel(arquivo, header=None) if arquivo.name.endswith('xlsx') else pd.read_csv(arquivo, header=None)
             
             nome_emp = "EMPRESA"
@@ -80,4 +80,18 @@ else:
                     f_tit = wb.add_format({'bold':1,'align':'center','valign':'vcenter','bg_color':'#D3D3D3','border':1})
                     f_std = wb.add_format({'border':1})
                     f_cen = wb.add_format({'border':1, 'align':'center'})
-                    f_con = wb.add_format({'num_format': '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R
+                    # FORMATOS DE DINHEIRO (Protegidos para não dar erro)
+                    fmt_moeda = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
+                    f_con = wb.add_format({'num_format': fmt_moeda, 'border': 1})
+                    f_vde = wb.add_format({'num_format': '_-R$ * #,##0.00_-', 'font_color': 'green', 'bold': 1, 'border': 1})
+                    f_vrm = wb.add_format({'num_format': '_-R$ * #,##0.00_-', 'font_color': 'red', 'bold': 1, 'border': 1})
+                    f_cab = wb.add_format({'bold':1,'bg_color':'#F2F2F2','border':1, 'align':'center'})
+
+                    for cod, df in banco.items():
+                        aba = re.sub(r'[\\/*?:\[\]]', '', cod)[:31]
+                        ws = wb.add_worksheet(aba)
+                        ws.hide_gridlines(2)
+                        ws.set_column('A:A', 0.5); ws.set_row(0, 5)
+                        ws.merge_range('B2:M3', f"EMPRESA: {nome_emp}", f_tit)
+                        ws.merge_range('B5:F5', f_info[cod], f_cab)
+                        ws.
