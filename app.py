@@ -4,7 +4,7 @@ import re
 from io import BytesIO
 
 st.set_page_config(page_title="Conciliador Mestre", layout="wide")
-st.title("🤖 Robô Conciliador (Título Adicionado)")
+st.title("🤖 Robô Conciliador - Versão Final Organizada")
 
 def to_num(val):
     try:
@@ -32,7 +32,8 @@ if arquivo:
             lin = df_bruto.iloc[i]
             if "Conta:" in str(lin[0]):
                 if f_at and dados: banco[f_at] = pd.DataFrame(dados)
-                f_at = f"{str(lin[1])} - {str(lin[5]) if pd.notna(lin[5]) else str(lin[2])}"
+                # --- PEGA APENAS O CÓDIGO DO FORNECEDOR PARA A ABA ---
+                f_at = str(lin[1]).strip()
                 dados = []
             elif len(lin) > 9:
                 deb, cre = to_num(lin[8]), to_num(lin[9])
@@ -60,17 +61,18 @@ if arquivo:
                 f_cab = wb.add_format({'bold':1,'bg_color':'#F2F2F2','border':1, 'align':'center'})
 
                 for f, df in banco.items():
+                    # Aba com nome limpo (apenas código)
                     aba = re.sub(r'[\\/*?:\[\]]', '', f)[:31]
                     ws = wb.add_worksheet(aba)
                     ws.hide_gridlines(2)
-                    ws.set_column('A:A', 2)
-                    ws.set_row(0, 5)
+                    
+                    # --- AJUSTE: COLUNA A COM A MESMA LARGURA DA LINHA 1 ---
+                    ws.set_column('A:A', 0.5) # Deixa bem fininha como a linha 1
+                    ws.set_row(0, 5) # Linha 1 fininha
                     ws.ignore_errors({'number_stored_as_text': 'B1:L5000'})
                     
                     ws.merge_range('B2:M3', f"EMPRESA: {nome_emp}", f_tit)
-                    ws.merge_range('B5:F5', f, f_cab)
-                    
-                    # --- NOVO TÍTULO NA LINHA 5 (Colunas I até L) ---
+                    ws.merge_range('B5:F5', f"FORNECEDOR: {f}", f_cab)
                     ws.merge_range('I5:L5', 'Conciliação por nota', f_cab)
                     
                     for ci, v in enumerate(["Data","NF","Histórico","Débito","Crédito"]):
@@ -111,7 +113,7 @@ if arquivo:
                     ws.set_column('G:H', 2)
                     ws.set_column('I:L', 18)
 
-            st.success("✅ Título adicionado com sucesso!")
-            st.download_button("📥 Baixar Excel com Título", out.getvalue(), "conciliacao_completa.xlsx")
+            st.success("✅ Feito! Abas com códigos e Coluna A ajustada.")
+            st.download_button("📥 Baixar Excel Organizado", out.getvalue(), "conciliacao_organizada.xlsx")
     except Exception as e:
         st.error(f"Erro: {e}")
