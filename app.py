@@ -7,7 +7,7 @@ import time
 # 1. Configuração
 st.set_page_config(page_title="LAPIDÔ", layout="wide")
 
-# 2. Título (Ajuste para #1E90FF se for Fornecedores)
+# 2. Título do Site
 st.markdown("""
     <style>
     .titulo {color: #FF8C00; font-size: 40px; font-weight: bold; text-align: center; padding: 10px;}
@@ -27,7 +27,7 @@ with st.sidebar:
     arquivo = st.file_uploader("Suba o arquivo aqui", type=["xlsx", "csv"])
 
 if arquivo:
-    with st.spinner('💎 Pintando e ajustando alturas...'):
+    with st.spinner('💎 Ajustando linhas e tirando triângulos...'):
         try:
             time.sleep(1)
             df_bruto = pd.read_excel(arquivo, header=None) if arquivo.name.endswith('xlsx') else pd.read_csv(arquivo, header=None)
@@ -71,16 +71,15 @@ if arquivo:
                 out = BytesIO()
                 with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
                     wb = writer.book
+                    
+                    # 🪄 MÁGICA 1: Tira os triângulos verdes (erros de número como texto)
+                    wb.set_custom_property('ignore_errors', True) 
+                    
                     f_cent = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
                     f_moeda = wb.add_format({'num_format': 'R$ #,##0.00', 'border': 1})
                     f_std = wb.add_format({'border': 1})
-                    
-                    # Formato Cabeçalho (Cinza)
                     f_cab = wb.add_format({'bold': 1, 'bg_color': '#F2F2F2', 'align': 'center', 'valign': 'vcenter', 'border': 1})
-                    
-                    # Formato Empresa (Linha 2)
                     f_empresa = wb.add_format({'bold': 1, 'font_size': 14, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#D3D3D3', 'border': 1})
-                    
                     f_vde = wb.add_format({'num_format': 'R$ #,##0.00', 'font_color': 'green', 'bold': 1, 'border': 1, 'align': 'center'})
                     f_vrm = wb.add_format({'num_format': 'R$ #,##0.00', 'font_color': 'red', 'bold': 1, 'border': 1, 'align': 'center'})
 
@@ -88,6 +87,10 @@ if arquivo:
                         ws = wb.add_worksheet(str(cod)[:31])
                         ws.hide_gridlines(2)
                         
+                        # 🪄 MÁGICA 2: Ignora erros de números armazenados como texto na planilha toda
+                        ws.ignore_errors({'number_stored_as_text': 'A1:X1000'})
+                        
+                        # COLUNAS
                         ws.set_column('A:A', 1)
                         ws.set_column('B:C', 15)
                         ws.set_column('D:D', 45)
@@ -95,22 +98,29 @@ if arquivo:
                         ws.set_column('G:H', 1)
                         ws.set_column('I:L', 18)
                         
-                        # AJUSTE: Altura da Linha 2 diminuída para 22 (estava 30)
-                        ws.set_row(1, 22)
+                        # 🪄 MÁGICA 3: Linha 1 fininha (igual coluna A) e tudo começa na Linha 4
+                        ws.set_row(0, 1) # Linha 1 quase invisível
+                        ws.set_row(1, 22) # Linha 2 (Empresa)
+                        ws.set_row(2, 5)  # Linha 3 (Espaço pequeno)
+                        
+                        # EMPRESA NA LINHA 2 (Começa aqui)
                         ws.merge_range('B2:L2', f"EMPRESA: {nome_emp}", f_empresa)
                         
-                        # AJUSTE: Nome pintadinho igual à conciliação (f_cab)
-                        ws.merge_range('B5:F5', f_info[cod], f_cab)
-                        ws.merge_range('I5:L5', "CONCILIAÇÃO POR NOTA", f_cab)
+                        # INFORMAÇÕES NA LINHA 4 (B4 até L4)
+                        ws.set_row(3, 20) # Linha 4
+                        ws.merge_range('B4:F4', f_info[cod], f_cab)
+                        ws.merge_range('I4:L4', "CONCILIAÇÃO POR NOTA", f_cab)
                         
+                        # Cabeçalhos na Linha 5
                         for ci, v in enumerate(["Data","NF","Histórico","Débito","Crédito"]):
-                            ws.write(6, ci+1, v, f_cab)
+                            ws.write(5, ci+1, v, f_cab)
                         
+                        # Dados começam na Linha 6
                         for ri, row in enumerate(df.values):
-                            ws.write(7+ri, 1, row[0], f_cent); ws.write(7+ri, 2, row[1], f_cent)
-                            ws.write(7+ri, 3, row[2], f_std); ws.write(7+ri, 4, row[3], f_moeda); ws.write(7+ri, 5, row[4], f_moeda)
+                            ws.write(6+ri, 1, row[0], f_cent); ws.write(6+ri, 2, row[1], f_cent)
+                            ws.write(6+ri, 3, row[2], f_std); ws.write(6+ri, 4, row[3], f_moeda); ws.write(6+ri, 5, row[4], f_moeda)
                         
-                        lt = 7 + len(df) + 1 
+                        lt = 6 + len(df) + 1 
                         ws.write(lt, 3, "TOTALIZADOR:", f_cab)
                         ws.write(lt, 4, df['Deb'].sum(), f_moeda)
                         ws.write(lt, 5, df['Cred'].sum(), f_moeda)
@@ -118,17 +128,17 @@ if arquivo:
                         res = df.groupby("NF").agg({"Deb":"sum","Cred":"sum"}).reset_index()
                         res["Dif"] = res["Deb"] + res["Cred"]
                         for ci, v in enumerate(["NF","Deb","Cred","Dif"]):
-                            ws.write(6, ci+8, v, f_cab)
+                            ws.write(5, ci+8, v, f_cab)
                         
                         for ri, row in enumerate(res.values):
-                            ws.write(7+ri, 8, str(row[0]), f_cent)
-                            ws.write(7+ri, 9, row[1], f_moeda); ws.write(7+ri, 10, row[2], f_moeda); ws.write(7+ri, 11, row[3], f_moeda)
+                            ws.write(6+ri, 8, str(row[0]), f_cent)
+                            ws.write(6+ri, 9, row[1], f_moeda); ws.write(6+ri, 10, row[2], f_moeda); ws.write(6+ri, 11, row[3], f_moeda)
                         
-                        rf = 8 + len(res)
+                        rf = 7 + len(res)
                         ws.write(rf, 10, "Saldo Final:", f_cab)
                         ws.write(rf, 11, s := res["Dif"].sum(), f_vde if s >= 0 else f_vrm)
                 
-                st.success("✅ Tudo pintadinho e alinhado como você pediu!")
-                st.download_button("📥 Baixar Planilha", out.getvalue(), "relatorio_lapidado.xlsx")
+                st.success("✅ Feito! Sem triângulos, linha 1 fininha e tudo começando na linha 4!")
+                st.download_button("📥 Baixar Planilha", out.getvalue(), "relatorio_finalizado.xlsx")
         except Exception as e:
             st.error(f"Erro: {e}")
