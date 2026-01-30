@@ -4,7 +4,7 @@ import re
 from io import BytesIO
 
 st.set_page_config(page_title="Conciliador Mestre", layout="wide")
-st.title("🤖 Robô Conciliador (Data Longa e Formato Contábil)")
+st.title("🤖 Robô Conciliador (Histórico Ajustado e Limpeza)")
 
 def to_num(val):
     try:
@@ -36,17 +36,17 @@ if arquivo:
             elif len(lin) > 9:
                 d, c = to_num(lin[8]), to_num(lin[9])
                 if d != 0 or c != 0:
-                    # DATA NO FORMATO DIA/MES/XXXX (Ano com 4 dígitos)
+                    # REMOVE A LINHA SE O VALOR FOR APENAS "N" OU CONTIVER ERRO
+                    hist_texto = str(lin[2])
+                    if hist_texto.strip().upper() == 'N':
+                        continue
+
                     try: dt = pd.to_datetime(lin[0]).strftime('%d/%m/%Y')
                     except: dt = str(lin[0])[:10] if pd.notna(lin[0]) else ""
                     
-                    try:
-                        nf_find = re.findall(r'NFe\s?(\d+)', str(lin[2]))
-                        nf_final = nf_find[0] if nf_find else str(lin[1])
-                    except:
-                        nf_final = str(lin[1])
-                        
-                    dados.append({"Data": dt, "NF": nf_final, "Hist": str(lin[2]), "Deb": -d, "Cred": c})
+                    nf_find = re.findall(r'NFe\s?(\d+)', hist_texto)
+                    nf_final = nf_find[0] if nf_find else str(lin[1])
+                    dados.append({"Data": dt, "NF": nf_final, "Hist": hist_texto, "Deb": -d, "Cred": c})
 
         if f_atual and dados: banco[f_atual] = pd.DataFrame(dados)
 
@@ -55,21 +55,12 @@ if arquivo:
             with pd.ExcelWriter(out, engine='xlsxwriter') as writer:
                 wb = writer.book
                 
-                # --- NOVOS FORMATOS ---
                 f_tit = wb.add_format({'bold':1,'align':'center','valign':'vcenter','bg_color':'#D3D3D3','border':1, 'font_size': 14})
                 f_std = wb.add_format({'border':1})
                 f_cen = wb.add_format({'border':1, 'align':'center'})
-                
-                # FORMATO CONTÁBIL (R$ alinhado à esquerda, valor à direita)
-                f_contabil = wb.add_format({
-                    'num_format': '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-',
-                    'border': 1
-                })
-                
-                # FORMATO CONTÁBIL COLORIDO PARA O SALDO FINAL
+                f_contabil = wb.add_format({'num_format': '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-','border': 1})
                 f_vde = wb.add_format({'num_format': '_-R$ * #,##0.00_-', 'font_color':'green','bold':1,'border':1})
                 f_vrm = wb.add_format({'num_format': '_-R$ * #,##0.00_-', 'font_color':'red', 'bold':1,'border':1})
-                
                 f_cab = wb.add_format({'bold':1,'bg_color':'#F2F2F2','border':1, 'align':'center'})
 
                 for f, df in banco.items():
@@ -84,23 +75,28 @@ if arquivo:
                     ws.merge_range('B2:M3', f"EMPRESA: {nome_emp}", f_tit)
                     ws.merge_range('B5:F5', f, f_cab)
                     
-                    # Tabelas na Linha 7
                     for ci, v in enumerate(["Data","NF","Histórico","Débito","Crédito"]):
                         ws.write(6, ci+1, v, f_cab)
                     
+                    # ESCREVE OS DADOS
                     for ri, row in enumerate(df.values):
-                        ws.write(7+ri, 1, row[0], f_cen) # Data dia/mes/xxxx
+                        ws.write(7+ri, 1, row[0], f_cen)
                         ws.write(7+ri, 2, row[1], f_cen)
-                        ws.write(7+ri, 3, row[2], f_std)
-                        ws.write(7+ri, 4, row[3], f_contabil) # Débito Contábil
-                        ws.write(7+ri, 5, row[4], f_contabil) # Crédito Contábil
+                        ws.write(7+ri, 3, row[2], f_std) # Histórico
+                        ws.write(7+ri, 4, row[3], f_contabil)
+                        ws.write(7+ri, 5, row[4], f_contabil)
                     
+                    # --- AJUSTE AUTOMÁTICO DA LARGURA DO HISTÓRICO ---
+                    # Calcula o tamanho da maior frase na coluna Histórico (coluna D / index 3)
+                    max_hist = df['Hist'].astype(str).map(len).max()
+                    ws.set_column(3, 3, max(max_hist, 20)) # Ajusta a largura da coluna D
+                    
+                    # Totais e Conciliação seguem abaixo...
                     r_fim = 8 + len(df)
                     ws.write(r_fim, 3, "TOTAIS:", f_cab)
                     ws.write(r_fim, 4, df['Deb'].sum(), f_contabil)
                     ws.write(r_fim, 5, df['Cred'].sum(), f_contabil)
                     
-                    # Conciliação
                     res = df.groupby("NF").agg({"Deb":"sum","Cred":"sum"}).reset_index()
                     res["Dif"] = res["Deb"] + res["Cred"]
                     for ci, v in enumerate(["NF","Deb","Cred","Dif"]):
@@ -116,12 +112,11 @@ if arquivo:
                     ws.write(rf_res, 10, "Saldo Final:", f_cab)
                     ws.write(rf_res, 11, s, f_vde if s >= 0 else f_vrm)
                     
-                    ws.set_column('B:B', 12) # Coluna da data um pouco maior para o ano xxxx
-                    ws.set_column('C:F', 18)
+                    ws.set_column('B:B', 12)
+                    ws.set_column('C:C', 15)
+                    ws.set_column('E:F', 18)
                     ws.set_column('G:H', 2)
                     ws.set_column('I:L', 18)
 
-            st.success("✅ Estilo contábil e datas longas aplicadas!")
-            st.download_button("📥 Baixar Planilha Contábil", out.getvalue(), "conciliacao_contabil.xlsx")
-    except Exception as e:
-        st.error(f"Erro: {e}")
+            st.success("✅ Histórico ajustado e linhas 'N' removidas!")
+            st
