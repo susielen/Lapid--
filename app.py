@@ -7,7 +7,7 @@ import time
 # 1. Configuração da Página
 st.set_page_config(page_title="LAPIDÔ", page_icon="💎", layout="wide")
 
-# 2. Título do Site
+# 2. Estilo do Título Centralizado
 st.markdown("""
     <style>
     .titulo {
@@ -15,7 +15,7 @@ st.markdown("""
         font-size: 48px;
         font-weight: bold;
         text-align: center;
-        padding: 10px;
+        padding: 20px;
     }
     </style>
     <p class="titulo">💎 LAPIDÔ: O Mestre das Contas</p>
@@ -28,20 +28,21 @@ def to_num(val):
         return float(v)
     except: return 0.0
 
-# 3. Barra Lateral
+# 3. Gaveta Lateral para subir o arquivo
 with st.sidebar:
     st.header("⚙️ Painel de Controle")
     arquivo = st.file_uploader("Suba seu arquivo aqui", type=["xlsx", "csv"])
     st.divider()
     st.info("Colunas G e H ajustadas para ficarem fininhas.")
 
-# 4. O Polimento do Diamante
+# 4. Processamento com Efeito de Polimento
 if not arquivo:
-    st.warning("👈 O LAPIDÔ aguarda o arquivo na gavetinha lateral.")
+    st.warning("👈 Por favor, coloque a pedra bruta (arquivo) na gavetinha lateral.")
 else:
-    with st.spinner('💎 Polindo a pedra bruta... Formando o diamante...'):
+    # EFEITO DE "FORMANDO O DIAMANTE"
+    with st.spinner('💎 Polindo a pedra bruta... Transformando em diamante...'):
         try:
-            time.sleep(1.5)
+            time.sleep(1.5) 
             df_bruto = pd.read_excel(arquivo, header=None) if arquivo.name.endswith('xlsx') else pd.read_csv(arquivo, header=None)
             
             nome_emp = "EMPRESA"
@@ -69,6 +70,7 @@ else:
                         except: continue
                         nf_find = re.findall(r'NFe\s?(\d+)', hist)
                         nf_final = nf_find[0] if nf_find else str(lin[1])
+                        # MODO FORNECEDOR (Débito Negativo)
                         dados.append({"Data": dt, "NF": nf_final, "Hist": hist, "Deb": -deb, "Cred": cre})
 
             if f_cod_atual and dados: banco[f_cod_atual] = pd.DataFrame(dados)
@@ -80,7 +82,8 @@ else:
                     f_tit = wb.add_format({'bold':1,'align':'center','valign':'vcenter','bg_color':'#D3D3D3','border':1})
                     f_std = wb.add_format({'border':1})
                     f_cen = wb.add_format({'border':1, 'align':'center'})
-                    # FORMATOS DE DINHEIRO (Protegidos para não dar erro)
+                    
+                    # FORMATOS DE DINHEIRO PROTEGIDOS
                     fmt_moeda = '_-R$ * #,##0.00_-;-R$ * #,##0.00_-;_-R$ * "-"??_-;_-@_-'
                     f_con = wb.add_format({'num_format': fmt_moeda, 'border': 1})
                     f_vde = wb.add_format({'num_format': '_-R$ * #,##0.00_-', 'font_color': 'green', 'bold': 1, 'border': 1})
@@ -94,4 +97,34 @@ else:
                         ws.set_column('A:A', 0.5); ws.set_row(0, 5)
                         ws.merge_range('B2:M3', f"EMPRESA: {nome_emp}", f_tit)
                         ws.merge_range('B5:F5', f_info[cod], f_cab)
-                        ws.
+                        ws.merge_range('I5:L5', 'Conciliação por nota', f_cab)
+                        for ci, v in enumerate(["Data","NF","Histórico","Débito","Crédito"]):
+                            ws.write(6, ci+1, v, f_cab)
+                        for ri, row in enumerate(df.values):
+                            ws.write(7+ri, 1, row[0], f_cen); ws.write(7+ri, 2, row[1], f_cen)
+                            ws.write(7+ri, 3, row[2], f_std); ws.write(7+ri, 4, row[3], f_con); ws.write(7+ri, 5, row[4], f_con)
+                        
+                        # AJUSTE DAS COLUNAS (Fininhas!)
+                        ws.set_column('B:C', 12)
+                        ws.set_column('D:D', 35)
+                        ws.set_column('E:F', 18)
+                        ws.set_column('G:H', 1)  # G e H QUASE INVISÍVEIS
+                        ws.set_column('I:L', 18)
+                        
+                        r_fim = 8 + len(df)
+                        ws.write(r_fim, 3, "TOTAIS:", f_cab)
+                        ws.write(r_fim, 4, df['Deb'].sum(), f_con); ws.write(r_fim, 5, df['Cred'].sum(), f_con)
+                        res = df.groupby("NF").agg({"Deb":"sum","Cred":"sum"}).reset_index()
+                        res["Dif"] = res["Deb"] + res["Cred"]
+                        for ci, v in enumerate(["NF","Deb","Cred","Dif"]): ws.write(6, ci+8, v, f_cab)
+                        for ri, row in enumerate(res.values):
+                            ws.write(7+ri, 8, row[0], f_cen); ws.write(7+ri, 9, row[1], f_con)
+                            ws.write(7+ri, 10, row[2], f_con); ws.write(7+ri, 11, row[3], f_con)
+                        s = res["Dif"].sum(); rf_res = 8 + len(res)
+                        ws.write(rf_res, 10, "Saldo Final:", f_cab); ws.write(rf_res, 11, s, f_vde if s >= 0 else f_vrm)
+
+                st.success("✅ O diamante foi lapidado com sucesso!")
+                st.download_button("📥 Baixar Diamante (Excel)", out.getvalue(), "contas_lapidadas.xlsx")
+                
+        except Exception as e:
+            st.error(f"Ocorreu um erro: {e}")
