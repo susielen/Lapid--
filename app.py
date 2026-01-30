@@ -4,7 +4,7 @@ import re
 from io import BytesIO
 
 st.set_page_config(page_title="Conciliador Mestre", layout="wide")
-st.title("🤖 Robô Conciliador - Versão Final Organizada")
+st.title("🤖 Robô Conciliador - Versão Final Ajustada")
 
 def to_num(val):
     try:
@@ -26,14 +26,20 @@ if arquivo:
                 break
 
         banco = {}
-        f_at, dados = None, []
+        # Agora vamos guardar o código E o nome completo
+        f_info, dados = {}, []
+        f_cod_atual = None
 
         for i in range(len(df_bruto)):
             lin = df_bruto.iloc[i]
             if "Conta:" in str(lin[0]):
-                if f_at and dados: banco[f_at] = pd.DataFrame(dados)
-                # --- PEGA APENAS O CÓDIGO DO FORNECEDOR PARA A ABA ---
-                f_at = str(lin[1]).strip()
+                if f_cod_atual and dados: 
+                    banco[f_cod_atual] = pd.DataFrame(dados)
+                
+                f_cod_atual = str(lin[1]).strip()
+                # Guarda o nome completo (Código + Nome) para escrever dentro da aba
+                nome_completo = f"{f_cod_atual} - {str(lin[5]) if pd.notna(lin[5]) else str(lin[2])}"
+                f_info[f_cod_atual] = nome_completo
                 dados = []
             elif len(lin) > 9:
                 deb, cre = to_num(lin[8]), to_num(lin[9])
@@ -46,7 +52,7 @@ if arquivo:
                     nf_final = nf_find[0] if nf_find else str(lin[1])
                     dados.append({"Data": dt, "NF": nf_final, "Hist": hist, "Deb": -deb, "Cred": cre})
 
-        if f_at and dados: banco[f_at] = pd.DataFrame(dados)
+        if f_cod_atual and dados: banco[f_cod_atual] = pd.DataFrame(dados)
 
         if banco:
             out = BytesIO()
@@ -60,19 +66,19 @@ if arquivo:
                 f_vrm = wb.add_format({'num_format': '_-R$ * #,##0.00_-', 'font_color':'red', 'bold':1,'border':1})
                 f_cab = wb.add_format({'bold':1,'bg_color':'#F2F2F2','border':1, 'align':'center'})
 
-                for f, df in banco.items():
-                    # Aba com nome limpo (apenas código)
-                    aba = re.sub(r'[\\/*?:\[\]]', '', f)[:31]
+                for cod, df in banco.items():
+                    aba = re.sub(r'[\\/*?:\[\]]', '', cod)[:31]
                     ws = wb.add_worksheet(aba)
                     ws.hide_gridlines(2)
                     
-                    # --- AJUSTE: COLUNA A COM A MESMA LARGURA DA LINHA 1 ---
-                    ws.set_column('A:A', 0.5) # Deixa bem fininha como a linha 1
-                    ws.set_row(0, 5) # Linha 1 fininha
+                    ws.set_column('A:A', 0.5) 
+                    ws.set_row(0, 5) 
                     ws.ignore_errors({'number_stored_as_text': 'B1:L5000'})
                     
                     ws.merge_range('B2:M3', f"EMPRESA: {nome_emp}", f_tit)
-                    ws.merge_range('B5:F5', f"FORNECEDOR: {f}", f_cab)
+                    
+                    # --- NOME COMPLETO DENTRO DA ABA NA LINHA 5 ---
+                    ws.merge_range('B5:F5', f"FORNECEDOR: {f_info[cod]}", f_cab)
                     ws.merge_range('I5:L5', 'Conciliação por nota', f_cab)
                     
                     for ci, v in enumerate(["Data","NF","Histórico","Débito","Crédito"]):
@@ -113,7 +119,7 @@ if arquivo:
                     ws.set_column('G:H', 2)
                     ws.set_column('I:L', 18)
 
-            st.success("✅ Feito! Abas com códigos e Coluna A ajustada.")
-            st.download_button("📥 Baixar Excel Organizado", out.getvalue(), "conciliacao_organizada.xlsx")
+            st.success("✅ Tudo pronto! Abas com código e interior com nome completo.")
+            st.download_button("📥 Baixar Excel Completo", out.getvalue(), "conciliacao_final_ajustada.xlsx")
     except Exception as e:
         st.error(f"Erro: {e}")
