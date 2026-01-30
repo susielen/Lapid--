@@ -4,7 +4,7 @@ import re
 from io import BytesIO
 
 st.set_page_config(page_title="Conciliador Mestre", layout="wide")
-st.title("🤖 Robô Conciliador (Início na Linha 5)")
+st.title("🤖 Robô Conciliador (Início na Linha 7)")
 
 def to_num(val):
     try:
@@ -36,11 +36,19 @@ if arquivo:
             elif len(lin) > 9:
                 d, c = to_num(lin[8]), to_num(lin[9])
                 if d != 0 or c != 0:
-                    try: dt = pd.to_datetime(lin[0]).strftime('%d/%m/%y')
-                    except: dt = str(lin[0])[:10] if pd.notna(lin[0]) else ""
+                    # IGNORA QUALQUER ERRO NA DATA
+                    try: 
+                        dt = pd.to_datetime(lin[0]).strftime('%d/%m/%y')
+                    except: 
+                        dt = str(lin[0])[:10] if pd.notna(lin[0]) else ""
                     
-                    nf_find = re.findall(r'NFe\s?(\d+)', str(lin[2]))
-                    nf_final = nf_find[0] if nf_find else str(lin[1])
+                    # IGNORA QUALQUER ERRO NA NF
+                    try:
+                        nf_find = re.findall(r'NFe\s?(\d+)', str(lin[2]))
+                        nf_final = nf_find[0] if nf_find else str(lin[1])
+                    except:
+                        nf_final = str(lin[1])
+                        
                     dados.append({"Data": dt, "NF": nf_final, "Hist": str(lin[2]), "Deb": -d, "Cred": c})
 
         if f_atual and dados: banco[f_atual] = pd.DataFrame(dados)
@@ -65,41 +73,39 @@ if arquivo:
                     # Nome Empresa (Linhas 2 e 3)
                     ws.merge_range('B2:M3', f"EMPRESA: {nome_emp}", f_tit)
                     
-                    # --- NOVO INÍCIO: LINHA 5 ---
-                    # Nome do Fornecedor agora na Linha 5 (Excel index 4)
+                    # Nome do Fornecedor na Linha 5
                     ws.merge_range('B5:F5', f, f_cab)
                     
-                    # Cabeçalhos do Razão na Linha 6 (Excel index 5)
+                    # --- NOVO INÍCIO DAS TABELAS: LINHA 7 (Index 6) ---
                     for ci, v in enumerate(["Data","NF","Histórico","Débito","Crédito"]):
-                        ws.write(5, ci+1, v, f_cab)
+                        ws.write(6, ci+1, v, f_cab)
                     
-                    # Dados começam na Linha 7 (Excel index 6)
                     for ri, row in enumerate(df.values):
-                        ws.write(6+ri, 1, row[0], f_cen)
-                        ws.write(6+ri, 2, row[1], f_cen)
-                        ws.write(6+ri, 3, row[2], f_std)
-                        ws.write(6+ri, 4, row[3], f_cur)
-                        ws.write(6+ri, 5, row[4], f_cur)
+                        ws.write(7+ri, 1, row[0], f_cen)
+                        ws.write(7+ri, 2, row[1], f_cen)
+                        ws.write(7+ri, 3, row[2], f_std)
+                        ws.write(7+ri, 4, row[3], f_cur)
+                        ws.write(7+ri, 5, row[4], f_cur)
                     
-                    # Totais Razão (Pula 1 linha após os dados)
-                    r_fim = 7 + len(df)
+                    # Totais Razão (Pula 1 linha)
+                    r_fim = 8 + len(df)
                     ws.write(r_fim, 3, "TOTAIS:", f_cab)
                     ws.write(r_fim, 4, df['Deb'].sum(), f_cur)
                     ws.write(r_fim, 5, df['Cred'].sum(), f_cur)
                     
-                    # Conciliação (Acompanha a mesma altura)
+                    # Conciliação (Início na mesma altura: Linha 7)
                     res = df.groupby("NF").agg({"Deb":"sum","Cred":"sum"}).reset_index()
                     res["Dif"] = res["Deb"] + res["Cred"]
                     for ci, v in enumerate(["NF","Deb","Cred","Dif"]):
-                        ws.write(5, ci+8, v, f_cab)
+                        ws.write(6, ci+8, v, f_cab)
                     for ri, row in enumerate(res.values):
-                        ws.write(6+ri, 8, row[0], f_cen)
-                        ws.write(6+ri, 9, row[1], f_cur)
-                        ws.write(6+ri, 10, row[2], f_cur)
-                        ws.write(6+ri, 11, row[3], f_cur)
+                        ws.write(7+ri, 8, row[0], f_cen)
+                        ws.write(7+ri, 9, row[1], f_cur)
+                        ws.write(7+ri, 10, row[2], f_cur)
+                        ws.write(7+ri, 11, row[3], f_cur)
                     
-                    # Saldo Final (Pula 1 linha após a conciliação)
-                    rf_res = 7 + len(res)
+                    # Saldo Final (Pula 1 linha)
+                    rf_res = 8 + len(res)
                     s = res["Dif"].sum()
                     ws.write(rf_res, 10, "Saldo Final:", f_cab)
                     ws.write(rf_res, 11, s, f_vde if s >= 0 else f_vrm)
@@ -108,7 +114,7 @@ if arquivo:
                     ws.set_column('G:H', 2)
                     ws.set_column('I:L', 18)
 
-            st.success("✅ Tudo pronto! Agora as informações começam na linha 5.")
-            st.download_button("📥 Baixar Planilha Compacta", out.getvalue(), "conciliacao_linha5.xlsx")
+            st.success("✅ Feito! As tabelas agora começam na linha 7.")
+            st.download_button("📥 Baixar Planilha Ajustada", out.getvalue(), "conciliacao_linha7.xlsx")
     except Exception as e:
         st.error(f"Erro: {e}")
