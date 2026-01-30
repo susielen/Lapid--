@@ -4,7 +4,7 @@ import re
 from io import BytesIO
 
 st.set_page_config(page_title="Conciliador Mestre", layout="wide")
-st.title("🤖 Robô Conciliador - Versão Final Ajustada")
+st.title("🤖 Robô Conciliador - Versão Clean")
 
 def to_num(val):
     try:
@@ -26,7 +26,6 @@ if arquivo:
                 break
 
         banco = {}
-        # Agora vamos guardar o código E o nome completo
         f_info, dados = {}, []
         f_cod_atual = None
 
@@ -37,7 +36,7 @@ if arquivo:
                     banco[f_cod_atual] = pd.DataFrame(dados)
                 
                 f_cod_atual = str(lin[1]).strip()
-                # Guarda o nome completo (Código + Nome) para escrever dentro da aba
+                # Guarda apenas Código - Nome (sem a palavra "Fornecedor")
                 nome_completo = f"{f_cod_atual} - {str(lin[5]) if pd.notna(lin[5]) else str(lin[2])}"
                 f_info[f_cod_atual] = nome_completo
                 dados = []
@@ -77,8 +76,8 @@ if arquivo:
                     
                     ws.merge_range('B2:M3', f"EMPRESA: {nome_emp}", f_tit)
                     
-                    # --- NOME COMPLETO DENTRO DA ABA NA LINHA 5 ---
-                    ws.merge_range('B5:F5', f"FORNECEDOR: {f_info[cod]}", f_cab)
+                    # --- LINHA 5: APENAS CÓDIGO - NOME (Sem a palavra Fornecedor) ---
+                    ws.merge_range('B5:F5', f_info[cod], f_cab)
                     ws.merge_range('I5:L5', 'Conciliação por nota', f_cab)
                     
                     for ci, v in enumerate(["Data","NF","Histórico","Débito","Crédito"]):
@@ -119,7 +118,7 @@ if arquivo:
                     ws.set_column('G:H', 2)
                     ws.set_column('I:L', 18)
 
-            st.success("✅ Tudo pronto! Abas com código e interior com nome completo.")
-            st.download_button("📥 Baixar Excel Completo", out.getvalue(), "conciliacao_final_ajustada.xlsx")
+            st.success("✅ Ajuste feito! A palavra 'Fornecedor' foi removida.")
+            st.download_button("📥 Baixar Excel Clean", out.getvalue(), "conciliacao_clean.xlsx")
     except Exception as e:
         st.error(f"Erro: {e}")
